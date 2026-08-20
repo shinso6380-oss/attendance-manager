@@ -151,9 +151,8 @@ function needsCopayField(child) {
 }
 
 /**
- * 발달바우처가 단독 선택된 경우: 총 금액은 청구하지 않고 6·7회차 이상 추가금만 추가납부액.
- * 발달바우처 + 다른 바우처(교육청/스포츠 등)가 함께 선택된 경우: 다른 바우처들의 차감액을
- * 총 금액에서 뺀 값 + 6·7회차 추가금. (발달바우처 자체 차감액은 정보 표시용, 청구액엔 반영 안 함)
+ * 발달바우처가 포함된 경우(다른 바우처와 함께 선택되어도): 총 금액은 청구하지 않고
+ * 6·7회차 이상 추가금만 추가납부액으로 정산. (다른 바우처 차감액은 정보 표시용)
  * 발달바우처 없이 다른 바우처만 있는 경우: 총 금액 - 바우처 차감액. 본인부담금은 항상 별도.
  */
 function calculateMonthlyFee(child, sessionCount) {
@@ -193,22 +192,23 @@ function calculateMonthlyFee(child, sessionCount) {
     }
   }
 
+  const otherSuffix = isDevelopmental ? '(참고)' : '';
   if (types.includes('edu-therapy')) {
     otherDeduction += EDU_VOUCHER_AMOUNTS['edu-therapy'];
-    breakdown.push(`교육청 치료지원 차감: -${formatCurrency(EDU_VOUCHER_AMOUNTS['edu-therapy'])}`);
+    breakdown.push(`교육청 치료지원 차감${otherSuffix}: -${formatCurrency(EDU_VOUCHER_AMOUNTS['edu-therapy'])}`);
   }
   if (types.includes('edu-afterschool')) {
     otherDeduction += EDU_VOUCHER_AMOUNTS['edu-afterschool'];
-    breakdown.push(`교육청 방과 후 차감: -${formatCurrency(EDU_VOUCHER_AMOUNTS['edu-afterschool'])}`);
+    breakdown.push(`교육청 방과 후 차감${otherSuffix}: -${formatCurrency(EDU_VOUCHER_AMOUNTS['edu-afterschool'])}`);
   }
   if (types.includes('sports')) {
     otherDeduction += SPORTS_VOUCHER_AMOUNT;
-    breakdown.push(`스포츠바우처 차감: -${formatCurrency(SPORTS_VOUCHER_AMOUNT)}`);
+    breakdown.push(`스포츠바우처 차감${otherSuffix}: -${formatCurrency(SPORTS_VOUCHER_AMOUNT)}`);
   }
 
   const extraAmount = extra6Amount + extra7Amount;
   const voucherDeduction = developmentalDeduction + otherDeduction;
-  const baseContribution = (isDevelopmental && otherDeduction === 0) ? 0 : Math.max(0, baseTotal - otherDeduction);
+  const baseContribution = isDevelopmental ? 0 : Math.max(0, baseTotal - otherDeduction);
   const additionalPayment = baseContribution + extraAmount;
   const copay = getCopayAmount(child);
 
@@ -218,7 +218,7 @@ function calculateMonthlyFee(child, sessionCount) {
 
   breakdown.push(`→ 추가금 납부액: ${formatCurrency(additionalPayment)}`);
 
-  return { baseTotal, voucherDeduction, extra6Amount, extra7Amount, extraAmount, additionalPayment, copay, breakdown, rate };
+  return { baseTotal, voucherDeduction, voucherDeductionIsReference: isDevelopmental, extra6Amount, extra7Amount, extraAmount, additionalPayment, copay, breakdown, rate };
 }
 
 function dateKey(date = new Date()) {
@@ -906,7 +906,7 @@ function renderFees() {
           </div>
           ${fee.voucherDeduction > 0 ? `
           <div class="fee-item">
-            <div class="label">바우처 차감</div>
+            <div class="label">바우처 차감${fee.voucherDeductionIsReference ? ' (참고)' : ''}</div>
             <div class="value fee-deduct">-${formatCurrency(fee.voucherDeduction)}</div>
           </div>` : ''}
           ${fee.extra6Amount > 0 ? `
