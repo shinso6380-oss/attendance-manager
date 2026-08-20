@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>출석 · 수업료 관리</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- 로딩 화면 -->
+  <div id="loadingScreen" class="loading-screen">
+    <p>불러오는 중...</p>
+  </div>
+
+  <!-- 로그인 화면 -->
+  <div id="loginScreen" class="login-screen hidden">
+    <div class="login-card">
+      <h1>출석 · 수업료 관리</h1>
+      <p class="login-sub">선생님 로그인</p>
+      <form id="loginForm">
+        <label class="field">
+          <span>아이디 (이름)</span>
+          <select name="username" required id="loginUsername">
+            <option value="">선택</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>비밀번호 (4자리)</span>
+          <input type="password" name="password" required pattern="[0-9]{4}" maxlength="4" inputmode="numeric" placeholder="0000">
+        </label>
+        <button type="submit" class="btn btn-primary btn-block">로그인</button>
+      </form>
+      <p class="login-hint">최초 비밀번호는 0000입니다. 관리자(신승오)가 변경할 수 있습니다.</p>
+    </div>
+  </div>
+
+  <!-- 메인 앱 -->
+  <div id="appScreen" class="hidden">
+    <header class="header">
+      <div class="header-top">
+        <h1>출석 · 수업료 관리</h1>
+        <div class="user-bar">
+          <span id="userLabel"></span>
+          <button class="btn btn-sm" id="btnLogout">로그아웃</button>
+        </div>
+      </div>
+      <nav class="nav-tabs">
+        <button class="tab active" data-tab="attendance">오늘 출석</button>
+        <button class="tab" data-tab="children">아이 관리</button>
+        <button class="tab" data-tab="fees">월 수업료 산정</button>
+        <button class="tab hidden" data-tab="settings" id="tabSettings">비밀번호 관리</button>
+      </nav>
+    </header>
+
+    <main class="main">
+      <section id="attendance" class="panel active">
+        <div class="panel-header">
+          <h2>오늘 출석 체크</h2>
+          <p class="today-label" id="todayLabel"></p>
+        </div>
+        <div id="attendanceList" class="attendance-list"></div>
+        <p id="attendanceEmpty" class="empty-msg hidden">오늘 수업이 있는 아이가 없습니다.</p>
+      </section>
+
+      <section id="children" class="panel">
+        <div class="panel-header">
+          <h2>아이 등록 · 관리</h2>
+          <button class="btn btn-primary" id="btnNewChild">+ 새 아이 등록</button>
+        </div>
+        <div id="childrenList" class="children-list"></div>
+      </section>
+
+      <section id="fees" class="panel">
+        <div class="panel-header">
+          <h2>월 수업료 산정</h2>
+          <div class="month-picker">
+            <button class="btn btn-icon" id="prevMonth">◀</button>
+            <span id="feeMonthLabel"></span>
+            <button class="btn btn-icon" id="nextMonth">▶</button>
+          </div>
+        </div>
+        <div id="feesList" class="fees-list"></div>
+      </section>
+
+      <section id="settings" class="panel">
+        <div class="panel-header">
+          <h2>선생님 비밀번호 관리</h2>
+        </div>
+        <div id="passwordList" class="password-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="childModal" class="modal">
+    <form id="childForm" class="modal-content">
+      <div class="modal-header">
+        <h3 id="modalTitle">새 아이 등록</h3>
+        <button type="button" class="btn-close" id="closeModal">×</button>
+      </div>
+      <div class="form-grid">
+        <label class="field">
+          <span>이름 *</span>
+          <input type="text" name="name" required placeholder="아이 이름">
+        </label>
+        <label class="field">
+          <span>생년월일</span>
+          <input type="date" name="birthDate">
+        </label>
+        <label class="field">
+          <span>수업 시간</span>
+          <input type="time" name="classTime" value="14:00">
+        </label>
+        <label class="field">
+          <span>담당 선생님 *</span>
+          <select name="teacher" required id="teacherSelect">
+            <option value="">선택</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>과목 *</span>
+          <select name="subject" required>
+            <option value="">선택</option>
+          </select>
+        </label>
+        <fieldset class="field field-full">
+          <legend>결제 구분 (중복 선택 가능)</legend>
+          <div class="day-checkboxes" id="paymentTypeCheckboxes"></div>
+        </fieldset>
+        <div class="field field-full" id="developmentalSubField" hidden>
+          <span>발달바우처 형별 (본인부담금)</span>
+          <div id="developmentalSubOptions" class="radio-group"></div>
+        </div>
+        <div class="field field-full" id="infantSubField" hidden>
+          <span>영유아 바우처 등급 (본인부담금)</span>
+          <div id="infantSubOptions" class="radio-group"></div>
+        </div>
+        <fieldset class="field field-full">
+          <legend>수업 요일 *</legend>
+          <div class="day-checkboxes" id="dayCheckboxes"></div>
+        </fieldset>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="cancelModal">취소</button>
+        <button type="submit" class="btn btn-primary">저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
