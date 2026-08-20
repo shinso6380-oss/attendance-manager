@@ -62,6 +62,17 @@ const PAYMENT_ACCOUNTS = {
   additional: '경남은행 01044946380 신승오 · 울산페이 QR코드 · 신용카드 납부 가능',
 };
 
+const CLASS_DURATION_MIN = 40;
+const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
+
+function addMinutesToTime(time, minutes) {
+  const [h, m] = time.split(':').map(Number);
+  const total = h * 60 + m + minutes;
+  const hh = String(Math.floor((total % 1440) / 60)).padStart(2, '0');
+  const mm = String(total % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
 function getCopayAccountNote(child) {
   const hasDevelopmental = child.paymentTypes?.includes('developmental');
   const hasInfant = child.paymentTypes?.includes('infant');
@@ -283,6 +294,8 @@ let currentUser = getSession();
 let editingChildId = null;
 let feeViewYear = new Date().getFullYear();
 let feeViewMonth = new Date().getMonth() + 1;
+let attViewYear = new Date().getFullYear();
+let attViewMonth = new Date().getMonth() + 1;
 
 const loadingScreen = document.getElementById('loadingScreen');
 const loginScreen = document.getElementById('loginScreen');
@@ -439,6 +452,17 @@ function bindEvents() {
     if (feeViewMonth > 12) { feeViewMonth = 1; feeViewYear++; }
     renderFees();
   });
+
+  document.getElementById('attPrevMonth').addEventListener('click', () => {
+    attViewMonth--;
+    if (attViewMonth < 1) { attViewMonth = 12; attViewYear--; }
+    renderMonthlyAttendance();
+  });
+  document.getElementById('attNextMonth').addEventListener('click', () => {
+    attViewMonth++;
+    if (attViewMonth > 12) { attViewMonth = 1; attViewYear++; }
+    renderMonthlyAttendance();
+  });
 }
 
 function handleLogin(e) {
@@ -474,15 +498,19 @@ function switchTab(name) {
   tabs.forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
   panels.forEach((p) => p.classList.toggle('active', p.id === name));
   if (name === 'attendance') renderAttendance();
+  if (name === 'schedule') renderSchedule();
   if (name === 'children') renderChildren();
   if (name === 'fees') renderFees();
+  if (name === 'monthlyAttendance') renderMonthlyAttendance();
   if (name === 'settings') renderPasswordSettings();
 }
 
 function renderAll() {
   renderAttendance();
+  renderSchedule();
   renderChildren();
   renderFees();
+  renderMonthlyAttendance();
   if (isAdmin()) renderPasswordSettings();
 }
 
@@ -969,6 +997,99 @@ function renderFees() {
       persistFeeRecordDebounced(cid);
     });
   });
+}
+
+function renderSchedule() {
+  const wrap = document.getElementById('scheduleTableWrap');
+  const children = getVisibleChildren().filter((c) => c.classTime);
+  const scheduleDays = DAYS.slice(1); // 월~토 (일요일 제외)
+
+  if (!children.length) {
+    wrap.innerHTML = '<p class="empty-msg">등록된 수업 시간이 없습니다.</p>';
+    return;
+  }
+
+  const times = [...new Set(children.map((c) => c.classTime))].sort();
+
+  const rows = times
+    .map((t) => {
+      const end = addMinutesToTime(t, CLASS_DURATION_MIN);
+      const cells = scheduleDays
+        .map((d) => {
+          const kids = children.filter((c) => c.classTime === t && c.days.includes(d.value));
+          const content = kids
+            .map(
+              (c) => `
+              <div class="schedule-child">
+                ${esc(c.name)}
+                <span class="schedule-meta">${SUBJECTS[c.subject]?.label || ''}${isAdmin() ? ' · ' + esc(c.teacher) : ''}</span>
+              </div>`
+            )
+            .join('');
+          return `<td>${content}</td>`;
+        })
+        .join('');
+      return `<tr><th>${t.slice(0, 5)}~${end}</th>${cells}</tr>`;
+    })
+    .join('');
+
+  wrap.innerHTML = `
+    <div class="payment-table-wrap">
+      <table class="schedule-table">
+        <thead><tr><th>시간</th>${scheduleDays.map((d) => `<th>${d.label}</th>`).join('')}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderMonthlyAttendance() {
+  document.getElementById('attMonthLabel').textContent = `${attViewYear}년 ${attViewMonth}월`;
+  const wrap = document.getElementById('monthlyAttendanceTableWrap');
+  const children = getVisibleChildren();
+
+  if (!children.length) {
+    wrap.innerHTML = '<p class="empty-msg">등록된 아이가 없습니다.</p>';
+    return;
+  }
+
+  const lastDay = new Date(attViewYear, attViewMonth, 0).getDate();
+  const dateList = Array.from({ length: lastDay }, (_, i) => i + 1);
+
+  const headerDates = dateList.map((d) => `<th>${d}</th>`).join('');
+  const headerDays = dateList
+    .map((d) => {
+      const dow = new Date(attViewYear, attViewMonth - 1, d).getDay();
+      return `<th class="weekday-th">${WEEKDAY_LABELS[dow]}</th>`;
+    })
+    .join('');
+
+  const bodyRows = children
+    .map((c) => {
+      const cells = dateList
+        .map((d) => {
+          const dow = new Date(attViewYear, attViewMonth - 1, d).getDay();
+          if (!c.days.includes(dow)) return '<td class="att-noclass"></td>';
+          const key = dateKey(new Date(attViewYear, attViewMonth - 1, d));
+          const record = data.attendance[key]?.[c.id];
+          if (!record || !record.status) return '<td class="att-empty">-</td>';
+          if (record.status === 'present') return '<td class="att-present">출석</td>';
+          return `<td class="att-absent">결석${record.reason ? `<br>${esc(record.reason)}` : ''}</td>`;
+        })
+        .join('');
+      return `<tr><th class="att-name">${esc(c.name)}</th>${cells}</tr>`;
+    })
+    .join('');
+
+  wrap.innerHTML = `
+    <div class="payment-table-wrap">
+      <table class="schedule-table monthly-attendance-table">
+        <thead>
+          <tr><th>이름</th>${headerDates}</tr>
+          <tr><th></th>${headerDays}</tr>
+        </thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>`;
 }
 
 function renderPasswordSettings() {

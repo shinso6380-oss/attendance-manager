@@ -46,8 +46,10 @@
       </div>
       <nav class="nav-tabs">
         <button class="tab active" data-tab="attendance">오늘 출석</button>
+        <button class="tab" data-tab="schedule">시간표</button>
         <button class="tab" data-tab="children">아이 관리</button>
         <button class="tab" data-tab="fees">월 수업료 산정</button>
+        <button class="tab" data-tab="monthlyAttendance">월 출석부</button>
         <button class="tab hidden" data-tab="settings" id="tabSettings">비밀번호 관리</button>
       </nav>
     </header>
@@ -60,6 +62,13 @@
         </div>
         <div id="attendanceList" class="attendance-list"></div>
         <p id="attendanceEmpty" class="empty-msg hidden">오늘 수업이 있는 아이가 없습니다.</p>
+      </section>
+
+      <section id="schedule" class="panel">
+        <div class="panel-header">
+          <h2>시간표 (월~토)</h2>
+        </div>
+        <div id="scheduleTableWrap"></div>
       </section>
 
       <section id="children" class="panel">
@@ -80,6 +89,18 @@
           </div>
         </div>
         <div id="feesList" class="fees-list"></div>
+      </section>
+
+      <section id="monthlyAttendance" class="panel">
+        <div class="panel-header">
+          <h2>월 출석부</h2>
+          <div class="month-picker">
+            <button class="btn btn-icon" id="attPrevMonth">◀</button>
+            <span id="attMonthLabel"></span>
+            <button class="btn btn-icon" id="attNextMonth">▶</button>
+          </div>
+        </div>
+        <div id="monthlyAttendanceTableWrap"></div>
       </section>
 
       <section id="settings" class="panel">
