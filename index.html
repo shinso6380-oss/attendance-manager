@@ -15,6 +15,7 @@
   <!-- 로그인 화면 -->
   <div id="loginScreen" class="login-screen hidden">
     <div class="login-card">
+      <img src="assets/logo.png" alt="울산언어심리운동센터" class="login-logo">
       <h1>출석 · 수업료 관리</h1>
       <p class="login-sub">선생님 로그인</p>
       <form id="loginForm">
@@ -38,7 +39,10 @@
   <div id="appScreen" class="hidden">
     <header class="header">
       <div class="header-top">
-        <h1>출석 · 수업료 관리</h1>
+        <div class="brand">
+          <img src="assets/logo.png" alt="울산언어심리운동센터" class="brand-logo">
+          <h1>출석 · 수업료 관리</h1>
+        </div>
         <div class="user-bar">
           <span id="userLabel"></span>
           <button class="btn btn-sm" id="btnLogout">로그아웃</button>
@@ -47,7 +51,7 @@
       <nav class="nav-tabs">
         <button class="tab active" data-tab="attendance">오늘 출석</button>
         <button class="tab" data-tab="schedule">시간표</button>
-        <button class="tab" data-tab="children">아이 관리</button>
+        <button class="tab" data-tab="children">대상자 관리</button>
         <button class="tab" data-tab="fees">월 수업료 산정</button>
         <button class="tab" data-tab="monthlyAttendance">월 출석부</button>
         <button class="tab hidden" data-tab="settings" id="tabSettings">비밀번호 관리</button>
@@ -61,7 +65,7 @@
           <p class="today-label" id="todayLabel"></p>
         </div>
         <div id="attendanceList" class="attendance-list"></div>
-        <p id="attendanceEmpty" class="empty-msg hidden">오늘 수업이 있는 아이가 없습니다.</p>
+        <p id="attendanceEmpty" class="empty-msg hidden">오늘 수업이 있는 대상자가 없습니다.</p>
       </section>
 
       <section id="schedule" class="panel">
@@ -73,8 +77,8 @@
 
       <section id="children" class="panel">
         <div class="panel-header">
-          <h2>아이 등록 · 관리</h2>
-          <button class="btn btn-primary" id="btnNewChild">+ 새 아이 등록</button>
+          <h2>대상자 등록 · 관리</h2>
+          <button class="btn btn-primary" id="btnNewChild">+ 새 대상자 등록</button>
         </div>
         <div id="childrenList" class="children-list"></div>
       </section>
@@ -99,8 +103,15 @@
             <span id="attMonthLabel"></span>
             <button class="btn btn-icon" id="attNextMonth">▶</button>
           </div>
+          <div class="att-actions no-print">
+            <button class="btn btn-sm" id="btnPrintAttendance">🖨 인쇄 / PDF로 저장</button>
+            <button class="btn btn-sm" id="btnExportAttendanceExcel">엑셀 다운로드</button>
+          </div>
         </div>
-        <div id="monthlyAttendanceTableWrap"></div>
+        <div id="attendancePrintArea">
+          <h3 id="attPrintTitle" class="print-only"></h3>
+          <div id="monthlyAttendanceTableWrap"></div>
+        </div>
       </section>
 
       <section id="settings" class="panel">
@@ -115,13 +126,13 @@
   <dialog id="childModal" class="modal">
     <form id="childForm" class="modal-content">
       <div class="modal-header">
-        <h3 id="modalTitle">새 아이 등록</h3>
+        <h3 id="modalTitle">새 대상자 등록</h3>
         <button type="button" class="btn-close" id="closeModal">×</button>
       </div>
       <div class="form-grid">
         <label class="field">
           <span>이름 *</span>
-          <input type="text" name="name" required placeholder="아이 이름">
+          <input type="text" name="name" required placeholder="대상자 이름">
         </label>
         <label class="field">
           <span>생년월일</span>

@@ -62,6 +62,7 @@ const PAYMENT_ACCOUNTS = {
   additional: '경남은행 01044946380 신승오 · 울산페이 QR코드 · 신용카드 납부 가능',
 };
 
+const CENTER_NAME = '울산언어심리운동센터';
 const CLASS_DURATION_MIN = 40;
 const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -463,6 +464,30 @@ function bindEvents() {
     if (attViewMonth > 12) { attViewMonth = 1; attViewYear++; }
     renderMonthlyAttendance();
   });
+
+  document.getElementById('btnPrintAttendance').addEventListener('click', () => {
+    document.getElementById('attPrintTitle').textContent = `${CENTER_NAME} 월 출석부 - ${attViewYear}년 ${attViewMonth}월`;
+    window.print();
+  });
+  document.getElementById('btnExportAttendanceExcel').addEventListener('click', exportMonthlyAttendanceExcel);
+}
+
+function exportMonthlyAttendanceExcel() {
+  const table = document.querySelector('#monthlyAttendanceTableWrap table');
+  if (!table) return;
+  const title = `${CENTER_NAME} 월 출석부 - ${attViewYear}년 ${attViewMonth}월`;
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+    <head><meta charset="UTF-8"></head>
+    <body><h3>${esc(title)}</h3>${table.outerHTML}</body></html>`;
+  const blob = new Blob(['﻿' + html], { type: 'application/vnd.ms-excel' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `월출석부_${attViewYear}${String(attViewMonth).padStart(2, '0')}.xls`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function handleLogin(e) {
@@ -554,7 +579,7 @@ function renderRadioGroup(name, subtypes, selected, showCopay) {
 
 function openChildModal(child = null) {
   editingChildId = child?.id ?? null;
-  document.getElementById('modalTitle').textContent = child ? '아이 정보 수정' : '새 아이 등록';
+  document.getElementById('modalTitle').textContent = child ? '대상자 정보 수정' : '새 대상자 등록';
   childForm.reset();
 
   const teacherSel = document.getElementById('teacherSelect');
@@ -680,7 +705,7 @@ async function deleteChild(id) {
     alert('삭제 권한이 없습니다.');
     return;
   }
-  if (!confirm('이 아이 정보를 삭제할까요?')) return;
+  if (!confirm('이 대상자 정보를 삭제할까요?')) return;
 
   const { error } = await supabaseClient.from('children').delete().eq('id', id);
   if (error) {
@@ -700,7 +725,7 @@ function renderChildren() {
   const children = getVisibleChildren();
 
   if (!children.length) {
-    list.innerHTML = '<p class="empty-msg">등록된 아이가 없습니다. 새 아이를 등록해 주세요.</p>';
+    list.innerHTML = '<p class="empty-msg">등록된 대상자가 없습니다. 새 대상자를 등록해 주세요.</p>';
     return;
   }
 
@@ -872,7 +897,7 @@ function renderFees() {
   const children = getVisibleChildren();
 
   if (!children.length) {
-    list.innerHTML = '<p class="empty-msg">등록된 아이가 없습니다.</p>';
+    list.innerHTML = '<p class="empty-msg">등록된 대상자가 없습니다.</p>';
     return;
   }
 
@@ -1048,7 +1073,7 @@ function renderMonthlyAttendance() {
   const children = getVisibleChildren();
 
   if (!children.length) {
-    wrap.innerHTML = '<p class="empty-msg">등록된 아이가 없습니다.</p>';
+    wrap.innerHTML = '<p class="empty-msg">등록된 대상자가 없습니다.</p>';
     return;
   }
 

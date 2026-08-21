@@ -47,6 +47,17 @@ body {
   gap: .5rem;
 }
 
+.brand {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+}
+
+.brand-logo {
+  height: 32px;
+  width: auto;
+}
+
 .user-bar {
   display: flex;
   align-items: center;
@@ -415,6 +426,14 @@ body {
   box-shadow: var(--shadow);
 }
 
+.login-logo {
+  display: block;
+  max-width: 220px;
+  width: 100%;
+  height: auto;
+  margin: 0 auto 1rem;
+}
+
 .login-card h1 {
   font-size: 1.25rem;
   text-align: center;
@@ -630,4 +649,52 @@ fieldset {
 @media (max-width: 600px) {
   .form-grid { grid-template-columns: 1fr; }
   .fee-summary { grid-template-columns: 1fr 1fr; }
+}
+
+.att-actions {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.print-only { display: none; }
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+
+  body * { visibility: hidden; }
+
+  #attendancePrintArea,
+  #attendancePrintArea * {
+    visibility: visible;
+  }
+
+  #attendancePrintArea {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+
+  .print-only {
+    display: block;
+    font-size: 1.1rem;
+    margin-bottom: .75rem;
+  }
+
+  .payment-table-wrap {
+    border: none;
+    overflow: visible;
+  }
+
+  .monthly-attendance-table {
+    font-size: 9pt;
+  }
+
+  .monthly-attendance-table .att-name {
+    position: static;
+  }
 }
