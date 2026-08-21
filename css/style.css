@@ -154,6 +154,34 @@ body {
 .child-name { font-weight: 700; font-size: 1rem; }
 .child-meta { color: var(--text-muted); font-size: .85rem; margin-top: .15rem; }
 
+.child-name-link {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.child-name-link:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.history-modal-body {
+  padding: 1.25rem;
+}
+
+.history-modal-body .month-picker {
+  margin-bottom: 1rem;
+  font-weight: 600;
+}
+
+.history-total-row {
+  background: #fef3c7;
+  font-weight: 700;
+}
+
+.history-total-row td {
+  color: #92400e;
+}
+
 .badge {
   display: inline-block;
   padding: .15rem .5rem;
@@ -575,6 +603,8 @@ body {
 }
 
 .fee-input-row input[type="number"] { width: 80px; }
+.fee-input-row input.additional-amount,
+.fee-input-row input.copay-amount { width: 110px; }
 .fee-input-row textarea {
   flex: 1;
   min-width: 200px;

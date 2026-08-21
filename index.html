@@ -70,7 +70,7 @@
 
       <section id="schedule" class="panel">
         <div class="panel-header">
-          <h2>시간표 (월~토)</h2>
+          <h2 id="scheduleTitle">시간표 (월~토)</h2>
         </div>
         <div id="scheduleTableWrap"></div>
       </section>
@@ -176,6 +176,26 @@
         <button type="submit" class="btn btn-primary">저장</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="childHistoryModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="historyModalTitle">납부 내역</h3>
+        <button type="button" class="btn-close" id="closeHistoryModal">×</button>
+      </div>
+      <div class="history-modal-body">
+        <div class="month-picker">
+          <button type="button" class="btn btn-icon" id="historyPrevYear">◀</button>
+          <span id="historyYearLabel"></span>
+          <button type="button" class="btn btn-icon" id="historyNextYear">▶</button>
+        </div>
+        <div id="historyTableWrap"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn" id="closeHistoryModalFooter">닫기</button>
+      </div>
+    </div>
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>

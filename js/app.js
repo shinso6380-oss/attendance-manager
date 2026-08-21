@@ -352,6 +352,8 @@ let feeViewYear = new Date().getFullYear();
 let feeViewMonth = new Date().getMonth() + 1;
 let attViewYear = new Date().getFullYear();
 let attViewMonth = new Date().getMonth() + 1;
+let historyChildId = null;
+let historyYear = new Date().getFullYear();
 
 const loadingScreen = document.getElementById('loadingScreen');
 const loginScreen = document.getElementById('loginScreen');
@@ -361,6 +363,7 @@ const tabs = document.querySelectorAll('.tab');
 const panels = document.querySelectorAll('.panel');
 const childModal = document.getElementById('childModal');
 const childForm = document.getElementById('childForm');
+const childHistoryModal = document.getElementById('childHistoryModal');
 
 async function init() {
   populateLoginSelect();
@@ -409,9 +412,11 @@ async function loadAllData() {
     data.monthlyFees[row.month_key][row.child_id] = {
       sessionCount: row.session_count,
       additionalDepositDate: row.additional_deposit_date || '',
+      additionalAmount: row.additional_amount ?? null,
       additionalPaid: row.additional_paid || false,
       additionalPaymentMethod: row.additional_payment_method || '',
       copayDepositDate: row.copay_deposit_date || '',
+      copayAmount: row.copay_amount ?? null,
       copayPaid: row.copay_paid || false,
       notes: row.notes || '',
     };
@@ -528,6 +533,83 @@ function bindEvents() {
     window.print();
   });
   document.getElementById('btnExportAttendanceExcel').addEventListener('click', exportMonthlyAttendanceExcel);
+
+  document.getElementById('closeHistoryModal').addEventListener('click', closeChildHistoryModal);
+  document.getElementById('closeHistoryModalFooter').addEventListener('click', closeChildHistoryModal);
+  document.getElementById('historyPrevYear').addEventListener('click', () => {
+    historyYear--;
+    renderChildHistory();
+  });
+  document.getElementById('historyNextYear').addEventListener('click', () => {
+    historyYear++;
+    renderChildHistory();
+  });
+}
+
+function openChildHistoryModal(childId) {
+  historyChildId = childId;
+  historyYear = new Date().getFullYear();
+  renderChildHistory();
+  childHistoryModal.showModal();
+}
+
+function closeChildHistoryModal() {
+  childHistoryModal.close();
+  historyChildId = null;
+}
+
+function getMonthlyFeeAmounts(childId, year, month) {
+  const child = data.children.find((c) => c.id === childId);
+  if (!child) return { additional: 0, copay: 0 };
+  const mk = monthKey(year, month);
+  const rec = data.monthlyFees[mk]?.[childId];
+  const sessionCount = rec?.sessionCount ?? countSessionsInMonth(year, month, child.days);
+  const fee = calculateMonthlyFee(child, sessionCount);
+  const additional = rec?.additionalAmount ?? fee.additionalPayment;
+  const copay = rec?.copayAmount ?? fee.copay;
+  return { additional, copay };
+}
+
+function renderChildHistory() {
+  const child = data.children.find((c) => c.id === historyChildId);
+  if (!child) return;
+
+  document.getElementById('historyModalTitle').textContent = `${child.name} 납부 내역`;
+  document.getElementById('historyYearLabel').textContent = `${historyYear}년`;
+
+  let totalAdditional = 0;
+  let totalCopay = 0;
+
+  const rows = Array.from({ length: 12 }, (_, i) => i + 1)
+    .map((m) => {
+      const { additional, copay } = getMonthlyFeeAmounts(historyChildId, historyYear, m);
+      totalAdditional += additional;
+      totalCopay += copay;
+      return `
+        <tr>
+          <td>${m}월</td>
+          <td class="amount">${formatCurrency(additional)}</td>
+          <td class="amount">${formatCurrency(copay)}</td>
+          <td class="amount">${formatCurrency(additional + copay)}</td>
+        </tr>`;
+    })
+    .join('');
+
+  document.getElementById('historyTableWrap').innerHTML = `
+    <div class="payment-table-wrap">
+      <table class="payment-table">
+        <thead><tr><th>월</th><th>추가금</th><th>본인부담금</th><th>합계</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot>
+          <tr class="history-total-row">
+            <td>합계</td>
+            <td class="amount">${formatCurrency(totalAdditional)}</td>
+            <td class="amount">${formatCurrency(totalCopay)}</td>
+            <td class="amount">${formatCurrency(totalAdditional + totalCopay)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>`;
 }
 
 function getAttendanceReportTitle() {
@@ -848,7 +930,7 @@ function renderChildren() {
       <div class="card">
         <div class="card-header">
           <div>
-            <div class="child-name">${esc(c.name)}</div>
+            <div class="child-name child-name-link" data-history="${c.id}">${esc(c.name)}</div>
             <div class="child-meta">
               ${c.birthDate ? `${esc(c.birthDate)} (${getAgeString(c.birthDate)}) · ` : ''}
               ${getDayLabels(c.days)} ${c.classTime || ''} ·
@@ -873,6 +955,9 @@ function renderChildren() {
   });
   list.querySelectorAll('[data-delete]').forEach((btn) => {
     btn.addEventListener('click', () => deleteChild(btn.dataset.delete));
+  });
+  list.querySelectorAll('[data-history]').forEach((el) => {
+    el.addEventListener('click', () => openChildHistoryModal(el.dataset.history));
   });
 }
 
@@ -964,9 +1049,11 @@ function getFeeRecord(childId) {
     data.monthlyFees[mk][childId] = {
       sessionCount: auto,
       additionalDepositDate: '',
+      additionalAmount: null,
       additionalPaid: false,
       additionalPaymentMethod: '',
       copayDepositDate: '',
+      copayAmount: null,
       copayPaid: false,
       notes: '',
     };
@@ -983,9 +1070,11 @@ async function persistFeeRecord(childId) {
       month_key: mk,
       session_count: rec.sessionCount,
       additional_deposit_date: rec.additionalDepositDate || null,
+      additional_amount: rec.additionalAmount ?? null,
       additional_paid: rec.additionalPaid || false,
       additional_payment_method: rec.additionalPaymentMethod || null,
       copay_deposit_date: rec.copayDepositDate || null,
+      copay_amount: rec.copayAmount ?? null,
       copay_paid: rec.copayPaid || false,
       notes: rec.notes || '',
     },
@@ -1047,7 +1136,7 @@ function renderFees() {
 
       return `
       <div class="card fee-card" data-fee-child="${c.id}">
-        <div class="child-name">${esc(c.name)}</div>
+        <div class="child-name child-name-link" data-history="${c.id}">${esc(c.name)}</div>
         <div class="child-meta">
           ${getDayLabels(c.days)} · ${SUBJECTS[c.subject]?.label} ·
           ${esc(c.paymentTypes?.length ? c.paymentTypes.map((t) => PAYMENT_TYPES[t] || t).join(' + ') : PAYMENT_TYPES.none)}
@@ -1091,6 +1180,7 @@ function renderFees() {
           <div class="fee-input-row">
             <label>추가금 입금일</label>
             <input type="date" class="additional-date" value="${feeRec.additionalDepositDate || ''}">
+            <input type="number" class="additional-amount" value="${feeRec.additionalAmount ?? fee.additionalPayment}" placeholder="추가납부액">
             <select class="additional-method">
               <option value="">결제 수단</option>
               ${Object.entries(PAYMENT_METHODS)
@@ -1106,6 +1196,7 @@ function renderFees() {
           <div class="fee-input-row">
             <label>본인부담금 입금일</label>
             <input type="date" class="copay-date" value="${feeRec.copayDepositDate || ''}">
+            <input type="number" class="copay-amount" value="${feeRec.copayAmount ?? fee.copay}" placeholder="본인부담금">
             <label class="paid-check">
               <input type="checkbox" class="copay-paid" ${feeRec.copayPaid ? 'checked' : ''}>
               납부 확인
@@ -1124,6 +1215,8 @@ function renderFees() {
   list.querySelectorAll('[data-fee-child]').forEach((card) => {
     const cid = card.dataset.feeChild;
 
+    card.querySelector('[data-history]')?.addEventListener('click', () => openChildHistoryModal(cid));
+
     card.querySelector('.session-count')?.addEventListener('change', async (e) => {
       getFeeRecord(cid).sessionCount = Math.max(0, Number(e.target.value) || 0);
       await persistFeeRecord(cid);
@@ -1132,6 +1225,11 @@ function renderFees() {
 
     card.querySelector('.additional-date')?.addEventListener('change', async (e) => {
       getFeeRecord(cid).additionalDepositDate = e.target.value;
+      await persistFeeRecord(cid);
+    });
+
+    card.querySelector('.additional-amount')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).additionalAmount = Number(e.target.value) || 0;
       await persistFeeRecord(cid);
     });
 
@@ -1150,6 +1248,11 @@ function renderFees() {
       await persistFeeRecord(cid);
     });
 
+    card.querySelector('.copay-amount')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).copayAmount = Number(e.target.value) || 0;
+      await persistFeeRecord(cid);
+    });
+
     card.querySelector('.copay-paid')?.addEventListener('change', async (e) => {
       getFeeRecord(cid).copayPaid = e.target.checked;
       await persistFeeRecord(cid);
@@ -1163,6 +1266,7 @@ function renderFees() {
 }
 
 function renderSchedule() {
+  document.getElementById('scheduleTitle').textContent = `${currentUser?.name || ''} 시간표 (월~토)`;
   const wrap = document.getElementById('scheduleTableWrap');
   const children = getVisibleChildren().filter((c) => c.classTime);
   const scheduleDays = DAYS.slice(1); // 월~토 (일요일 제외)
@@ -1181,13 +1285,16 @@ function renderSchedule() {
         .map((d) => {
           const kids = children.filter((c) => c.classTime === t && c.days.includes(d.value));
           const content = kids
-            .map(
-              (c) => `
+            .map((c) => {
+              const voucherLabel = c.paymentTypes?.length
+                ? c.paymentTypes.map((pt) => PAYMENT_TYPES[pt] || pt).join(' + ')
+                : PAYMENT_TYPES.none;
+              return `
               <div class="schedule-child">
                 ${esc(c.name)}
-                <span class="schedule-meta">${SUBJECTS[c.subject]?.label || ''}${isAdmin() ? ' · ' + esc(c.teacher) : ''}</span>
-              </div>`
-            )
+                <span class="schedule-meta">(${esc(voucherLabel)})</span>
+              </div>`;
+            })
             .join('');
           return `<td>${content}</td>`;
         })
