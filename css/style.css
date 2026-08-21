@@ -293,6 +293,15 @@ body {
   white-space: nowrap;
 }
 
+.payment-table td.amount-strong {
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.payment-table td.amount-negative {
+  color: var(--danger);
+}
+
 .payment-table-empty {
   padding: .75rem;
   margin: .75rem 0;
@@ -364,6 +373,46 @@ body {
   left: 0;
   background: var(--bg);
   z-index: 1;
+}
+
+.att-count {
+  display: block;
+  font-weight: 400;
+  font-size: .65rem;
+  color: var(--text-muted);
+}
+
+.att-payment-badge {
+  display: inline-block;
+  margin-top: .15rem;
+  padding: .05rem .35rem;
+  border-radius: 999px;
+  font-size: .6rem;
+  font-weight: 700;
+}
+
+.att-payment-badge.paid {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.att-payment-badge.unpaid {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.monthly-attendance-table .att-total-row {
+  background: #fef3c7;
+}
+
+.monthly-attendance-table .att-total-row .att-name {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.monthly-attendance-table .att-total-row .att-count {
+  color: #92400e;
+  font-weight: 700;
 }
 
 .monthly-attendance-table thead th.weekday-th {
@@ -504,11 +553,25 @@ body {
 .fee-input-row input[type="number"],
 .fee-input-row input[type="date"],
 .fee-input-row input[type="text"],
+.fee-input-row select,
 .fee-input-row textarea {
   padding: .4rem .6rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   font-size: .85rem;
+}
+
+.fee-input-row .paid-check {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  min-width: 0;
+  font-size: .85rem;
+  cursor: pointer;
+}
+
+.fee-input-row .paid-check input[type="checkbox"] {
+  cursor: pointer;
 }
 
 .fee-input-row input[type="number"] { width: 80px; }
