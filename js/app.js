@@ -922,6 +922,7 @@ async function handleChildSubmit(e) {
     developmentalSub: paymentTypes.includes('developmental') ? developmentalSub : '',
     infantSub: paymentTypes.includes('infant') ? infantSub : '',
     dayTimes,
+    days: Object.keys(dayTimes).map(Number),
   };
 
   const submitBtn = childForm.querySelector('.modal-footer .btn-primary');
