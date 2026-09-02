@@ -456,6 +456,31 @@ body {
   font-weight: 400;
   color: var(--text-muted);
   font-size: .7rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .2rem;
+  margin-top: .1rem;
+}
+
+.voucher-tag {
+  display: inline-block;
+  padding: .05rem .35rem;
+  border-radius: 3px;
+}
+
+.voucher-tag-edu-therapy {
+  color: #000;
+  background: #fdba74;
+}
+
+.voucher-tag-edu-afterschool {
+  color: #000;
+  background: #fbcfe8;
+}
+
+.voucher-tag-sports {
+  color: #000;
+  background: #7dd3fc;
 }
 
 .monthly-attendance-table th,
