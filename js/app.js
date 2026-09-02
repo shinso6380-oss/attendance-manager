@@ -335,6 +335,11 @@ function rowToChild(row) {
     dayTimes = {};
     days.forEach((d) => { dayTimes[d] = row.class_time || '14:00'; });
   }
+  // "15:00:00"(초 포함, DB time 타입)과 "15:00"(초 없음, <input type="time">)이
+  // 서로 다른 값으로 취급되지 않도록 항상 "HH:MM"으로 통일
+  Object.keys(dayTimes).forEach((d) => {
+    if (dayTimes[d]) dayTimes[d] = dayTimes[d].slice(0, 5);
+  });
   return {
     id: row.id,
     name: row.name,
