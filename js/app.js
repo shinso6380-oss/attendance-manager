@@ -354,6 +354,7 @@ let attViewYear = new Date().getFullYear();
 let attViewMonth = new Date().getMonth() + 1;
 let historyChildId = null;
 let historyYear = new Date().getFullYear();
+let extraTodayChildIds = [];
 
 const loadingScreen = document.getElementById('loadingScreen');
 const loginScreen = document.getElementById('loginScreen');
@@ -633,8 +634,9 @@ function exportMonthlyAttendanceExcel() {
     const rowVals = cells.map((cell) => {
       if (cell.type === 'noclass') return '';
       if (cell.type === 'empty') return '-';
-      if (cell.type === 'present') return '출석';
-      return cell.reason ? `결석(${cell.reason})` : '결석';
+      const makeupSuffix = cell.isMakeup ? '(보강)' : '';
+      if (cell.type === 'present') return `출석${makeupSuffix}`;
+      return (cell.reason ? `결석(${cell.reason})` : '결석') + makeupSuffix;
     });
     const statusText = paymentStatus === 'unpaid' ? ' - 미납' : paymentStatus === 'paid' ? ' - 납부완료' : '';
     aoa.push([`${c.name} (${presentCount}회)${statusText}`, ...rowVals]);
@@ -968,9 +970,31 @@ function renderAttendance() {
 
   document.getElementById('todayLabel').textContent = formatDateKR(today);
 
-  const todayChildren = getVisibleChildren().filter((c) => c.days.includes(todayDow));
+  if (!data.attendance[key]) data.attendance[key] = {};
+
+  const visible = getVisibleChildren();
+  const scheduled = visible.filter((c) => c.days.includes(todayDow));
+  const scheduledIds = new Set(scheduled.map((c) => c.id));
+
+  // 오늘자 출석 기록이 이미 있는(보강으로 추가됐던) 대상자는 새로고침 후에도 계속 보이도록 유지
+  Object.keys(data.attendance[key]).forEach((cid) => {
+    if (!scheduledIds.has(cid) && !extraTodayChildIds.includes(cid) && visible.some((c) => c.id === cid)) {
+      extraTodayChildIds.push(cid);
+    }
+  });
+
+  const extraChildren = extraTodayChildIds.map((cid) => visible.find((c) => c.id === cid)).filter(Boolean);
+  const todayChildren = [...scheduled, ...extraChildren];
+
   const list = document.getElementById('attendanceList');
   const empty = document.getElementById('attendanceEmpty');
+  const makeupSelect = document.getElementById('makeupChildSelect');
+
+  const todayIds = new Set(todayChildren.map((c) => c.id));
+  const makeupOptions = visible.filter((c) => !todayIds.has(c.id));
+  makeupSelect.innerHTML =
+    '<option value="">+ 보강 인원 추가</option>' +
+    makeupOptions.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
 
   if (!todayChildren.length) {
     list.innerHTML = '';
@@ -979,15 +1003,14 @@ function renderAttendance() {
   }
   empty.classList.add('hidden');
 
-  if (!data.attendance[key]) data.attendance[key] = {};
-
   list.innerHTML = todayChildren
     .map((c) => {
       const record = data.attendance[key][c.id] || { status: '', reason: '' };
       const isAbsent = record.status === 'absent';
+      const isMakeup = !scheduledIds.has(c.id);
       return `
       <div class="card" data-child="${c.id}">
-        <div class="child-name">${esc(c.name)}</div>
+        <div class="child-name">${esc(c.name)}${isMakeup ? ' <span class="badge makeup-badge">보강</span>' : ''}</div>
         <div class="child-meta">${c.classTime || ''} · ${esc(c.teacher)} · ${SUBJECTS[c.subject]?.label}</div>
         <div class="attendance-row" style="margin-top:.75rem">
           <div class="status-btns">
@@ -996,6 +1019,7 @@ function renderAttendance() {
           </div>
           <input class="absence-reason" placeholder="결석 사유" value="${esc(record.reason)}"
             ${isAbsent ? '' : 'disabled'}>
+          ${isMakeup ? '<button type="button" class="btn btn-sm btn-danger remove-makeup">제외</button>' : ''}
         </div>
       </div>`;
     })
@@ -1037,7 +1061,30 @@ function renderAttendance() {
       data.attendance[key][cid].reason = reasonInput.value;
       saveReasonDebounced(cid, reasonInput.value);
     });
+
+    card.querySelector('.remove-makeup')?.addEventListener('click', async () => {
+      if (data.attendance[key][cid]) {
+        if (!confirm('이미 체크된 출석 기록도 함께 삭제할까요?')) return;
+        const { error } = await supabaseClient.from('attendance').delete().eq('child_id', cid).eq('date', key);
+        if (error) {
+          console.error(error);
+          alert('삭제 중 오류가 발생했습니다.');
+          return;
+        }
+        delete data.attendance[key][cid];
+      }
+      extraTodayChildIds = extraTodayChildIds.filter((id) => id !== cid);
+      renderAttendance();
+    });
   });
+
+  makeupSelect.value = '';
+  makeupSelect.onchange = () => {
+    const cid = makeupSelect.value;
+    if (!cid) return;
+    extraTodayChildIds.push(cid);
+    renderAttendance();
+  };
 }
 
 function getFeeRecord(childId) {
@@ -1337,15 +1384,16 @@ function computeMonthlyAttendanceData(year, month) {
     let presentCount = 0;
     const cells = dateList.map((d) => {
       const dow = new Date(year, month - 1, d).getDay();
-      if (!c.days.includes(dow)) return { type: 'noclass' };
+      const isScheduled = c.days.includes(dow);
       const key = dateKey(new Date(year, month - 1, d));
       const record = data.attendance[key]?.[c.id];
-      if (!record || !record.status) return { type: 'empty' };
+      if (!record || !record.status) return { type: isScheduled ? 'empty' : 'noclass' };
+      const isMakeup = !isScheduled;
       if (record.status === 'present') {
         presentCount++;
-        return { type: 'present' };
+        return { type: 'present', isMakeup };
       }
-      return { type: 'absent', reason: record.reason || '' };
+      return { type: 'absent', reason: record.reason || '', isMakeup };
     });
     grandTotal += presentCount;
     const paymentStatus = getPaymentStatus(c, year, month);
@@ -1379,8 +1427,9 @@ function renderMonthlyAttendance() {
         .map((cell) => {
           if (cell.type === 'noclass') return '<td class="att-noclass"></td>';
           if (cell.type === 'empty') return '<td class="att-empty">-</td>';
-          if (cell.type === 'present') return '<td class="att-present">출석</td>';
-          return `<td class="att-absent">결석${cell.reason ? `<br>${esc(cell.reason)}` : ''}</td>`;
+          const makeupMark = cell.isMakeup ? '<br><span class="att-makeup-mark">(보강)</span>' : '';
+          if (cell.type === 'present') return `<td class="att-present">출석${makeupMark}</td>`;
+          return `<td class="att-absent">결석${cell.reason ? `<br>${esc(cell.reason)}` : ''}${makeupMark}</td>`;
         })
         .join('');
       const badge = paymentStatus === 'unpaid'
