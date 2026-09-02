@@ -33,6 +33,15 @@ const PAYMENT_METHODS = {
   ulsanpay: '울산페이',
 };
 
+// 시간표에서만 쓰는 간략 표기 (지정 안 된 유형은 PAYMENT_TYPES 전체 이름 사용)
+const SCHEDULE_VOUCHER_LABELS = {
+  developmental: '발달재활',
+  infant: '영유아',
+  'edu-therapy': '치료지원',
+  'edu-afterschool': '방과 후',
+  sports: '스포츠',
+};
+
 const PAYMENT_TYPE_OPTIONS = ['developmental', 'infant', 'edu-therapy', 'edu-afterschool', 'edu-umter', 'sports'];
 
 const DEVELOPMENTAL_SUBTYPES = {
@@ -1513,13 +1522,15 @@ function renderSchedule() {
           const kids = children.filter((c) => c.dayTimes[d.value] === t);
           const content = kids
             .map((c) => {
-              const voucherLabel = c.paymentTypes?.length
-                ? c.paymentTypes.map((pt) => PAYMENT_TYPES[pt] || pt).join(' + ')
-                : PAYMENT_TYPES.none;
+              const voucherTags = c.paymentTypes?.length
+                ? c.paymentTypes
+                    .map((pt) => `<span class="voucher-tag voucher-tag-${pt}">${esc(SCHEDULE_VOUCHER_LABELS[pt] || PAYMENT_TYPES[pt] || pt)}</span>`)
+                    .join('')
+                : `<span class="voucher-tag">${esc(PAYMENT_TYPES.none)}</span>`;
               return `
               <div class="schedule-child">
                 ${esc(c.name)}
-                <span class="schedule-meta">(${esc(voucherLabel)})</span>
+                <span class="schedule-meta">${voucherTags}</span>
               </div>`;
             })
             .join('');
