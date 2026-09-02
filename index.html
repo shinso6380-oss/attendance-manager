@@ -61,8 +61,13 @@
     <main class="main">
       <section id="attendance" class="panel active">
         <div class="panel-header">
-          <h2>오늘 출석 체크</h2>
-          <p class="today-label" id="todayLabel"></p>
+          <h2>출석 체크</h2>
+          <div class="month-picker">
+            <button class="btn btn-icon" id="attDatePrev">◀</button>
+            <p class="today-label" id="todayLabel"></p>
+            <button class="btn btn-icon" id="attDateNext">▶</button>
+            <button class="btn btn-sm" id="attDateToday">오늘</button>
+          </div>
         </div>
         <div class="makeup-add-row">
           <select id="makeupChildSelect">
@@ -70,7 +75,7 @@
           </select>
         </div>
         <div id="attendanceList" class="attendance-list"></div>
-        <p id="attendanceEmpty" class="empty-msg hidden">오늘 수업이 있는 대상자가 없습니다.</p>
+        <p id="attendanceEmpty" class="empty-msg hidden">이 날 수업이 있는 대상자가 없습니다.</p>
       </section>
 
       <section id="schedule" class="panel">
@@ -89,7 +94,13 @@
       <section id="children" class="panel">
         <div class="panel-header">
           <h2>대상자 등록 · 관리</h2>
-          <button class="btn btn-primary" id="btnNewChild">+ 새 대상자 등록</button>
+          <div class="children-header-actions">
+            <select id="childrenSortSelect">
+              <option value="recent">최신순</option>
+              <option value="name">이름순 (ㄱㄴㄷ)</option>
+            </select>
+            <button class="btn btn-primary" id="btnNewChild">+ 새 대상자 등록</button>
+          </div>
         </div>
         <div id="childrenList" class="children-list"></div>
       </section>
@@ -102,6 +113,11 @@
             <span id="feeMonthLabel"></span>
             <button class="btn btn-icon" id="nextMonth">▶</button>
           </div>
+        </div>
+        <div class="fees-select-row">
+          <button type="button" class="btn btn-sm" id="btnFeesSelectAll">전체 선택</button>
+          <button type="button" class="btn btn-sm" id="btnFeesSelectNone">전체 해제</button>
+          <div class="fees-child-checkboxes" id="feesChildCheckboxes"></div>
         </div>
         <div id="feesList" class="fees-list"></div>
       </section>

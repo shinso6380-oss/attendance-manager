@@ -108,6 +108,22 @@ body {
 
 .panel-header h2 { font-size: 1.125rem; }
 
+.children-header-actions {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+#childrenSortSelect {
+  padding: .5rem .75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: .875rem;
+  background: var(--surface);
+  cursor: pointer;
+}
+
 .today-label {
   color: var(--text-muted);
   font-size: .9rem;
@@ -209,6 +225,24 @@ body {
   color: var(--primary);
   font-weight: 600;
   cursor: pointer;
+}
+
+.fees-select-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-bottom: 1rem;
+  padding: .75rem;
+  background: var(--bg);
+  border-radius: var(--radius);
+}
+
+.fees-child-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  width: 100%;
 }
 
 .att-makeup-mark {
@@ -390,6 +424,16 @@ body {
   white-space: nowrap;
 }
 
+.schedule-cell-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: .3rem;
+}
+
+.schedule-cell-grid.two-col {
+  grid-template-columns: 1fr 1fr;
+}
+
 .schedule-child {
   display: flex;
   flex-direction: column;
@@ -397,9 +441,15 @@ body {
   font-weight: 600;
 }
 
-.schedule-child + .schedule-child {
+.schedule-cell-grid:not(.two-col) .schedule-child + .schedule-child {
   border-top: 1px dashed var(--border);
   margin-top: .2rem;
+}
+
+.schedule-cell-grid.two-col .schedule-child {
+  padding: .3rem;
+  border-radius: 4px;
+  background: var(--bg);
 }
 
 .schedule-meta {

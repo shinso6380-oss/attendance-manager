@@ -351,6 +351,7 @@ function rowToChild(row) {
     infantSub: row.infant_sub || '',
     days,
     dayTimes,
+    createdAt: row.created_at || null,
   };
 }
 
@@ -379,7 +380,10 @@ let attViewYear = new Date().getFullYear();
 let attViewMonth = new Date().getMonth() + 1;
 let historyChildId = null;
 let historyYear = new Date().getFullYear();
-let extraTodayChildIds = [];
+let extraChildIdsByDate = {};
+let childrenSortMode = 'recent';
+let attendanceViewDate = new Date();
+let feesExcludedIds = new Set();
 
 const loadingScreen = document.getElementById('loadingScreen');
 const loginScreen = document.getElementById('loginScreen');
@@ -505,7 +509,7 @@ function renderDayTimeRows(container = document.getElementById('dayTimeRows'), d
           <input type="checkbox" class="day-time-checkbox" data-day="${d.value}" ${checked ? 'checked' : ''}>
           ${d.label}
         </label>
-        <input type="time" class="day-time-input" data-day="${d.value}" value="${time}" ${checked ? '' : 'disabled'}>
+        <input type="time" class="day-time-input" data-day="${d.value}" value="${time}" step="600" ${checked ? '' : 'disabled'}>
       </div>`;
     })
     .join('');
@@ -526,11 +530,40 @@ function bindEvents() {
   document.getElementById('btnLogout').addEventListener('click', handleLogout);
   document.getElementById('btnAddTeacher').addEventListener('click', handleAddTeacher);
 
+  document.getElementById('attDatePrev').addEventListener('click', () => {
+    attendanceViewDate = new Date(attendanceViewDate);
+    attendanceViewDate.setDate(attendanceViewDate.getDate() - 1);
+    renderAttendance();
+  });
+  document.getElementById('attDateNext').addEventListener('click', () => {
+    attendanceViewDate = new Date(attendanceViewDate);
+    attendanceViewDate.setDate(attendanceViewDate.getDate() + 1);
+    renderAttendance();
+  });
+  document.getElementById('attDateToday').addEventListener('click', () => {
+    attendanceViewDate = new Date();
+    renderAttendance();
+  });
+
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => switchTab(tab.dataset.tab));
   });
 
   document.getElementById('btnNewChild').addEventListener('click', () => openChildModal());
+  document.getElementById('childrenSortSelect').addEventListener('change', (e) => {
+    childrenSortMode = e.target.value;
+    renderChildren();
+  });
+
+  document.getElementById('btnFeesSelectAll').addEventListener('click', () => {
+    feesExcludedIds.clear();
+    renderFees();
+  });
+  document.getElementById('btnFeesSelectNone').addEventListener('click', () => {
+    feesExcludedIds = new Set(getVisibleChildren().map((c) => c.id));
+    renderFees();
+  });
+
   document.getElementById('closeModal').addEventListener('click', closeChildModal);
   document.getElementById('cancelModal').addEventListener('click', closeChildModal);
   childForm.addEventListener('submit', handleChildSubmit);
@@ -1009,9 +1042,19 @@ async function deleteChild(id) {
   renderFees();
 }
 
+function sortChildren(children) {
+  const sorted = children.slice();
+  if (childrenSortMode === 'name') {
+    sorted.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  } else {
+    sorted.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }
+  return sorted;
+}
+
 function renderChildren() {
   const list = document.getElementById('childrenList');
-  const children = getVisibleChildren();
+  const children = sortChildren(getVisibleChildren());
 
   if (!children.length) {
     list.innerHTML = '<p class="empty-msg">등록된 대상자가 없습니다. 새 대상자를 등록해 주세요.</p>';
@@ -1067,26 +1110,31 @@ function renderChildren() {
 }
 
 function renderAttendance() {
-  const today = new Date();
-  const todayDow = today.getDay();
-  const key = dateKey(today);
+  const viewDate = attendanceViewDate;
+  const todayDow = viewDate.getDay();
+  const key = dateKey(viewDate);
+  const isToday = dateKey(new Date()) === key;
 
-  document.getElementById('todayLabel').textContent = formatDateKR(today);
+  document.getElementById('todayLabel').textContent = formatDateKR(viewDate) + (isToday ? ' (오늘)' : '');
 
   if (!data.attendance[key]) data.attendance[key] = {};
+  if (!extraChildIdsByDate[key]) extraChildIdsByDate[key] = [];
+  const extraIds = extraChildIdsByDate[key];
 
   const visible = getVisibleChildren();
-  const scheduled = visible.filter((c) => c.days.includes(todayDow));
+  const scheduled = visible
+    .filter((c) => c.days.includes(todayDow))
+    .sort((a, b) => (a.dayTimes?.[todayDow] || '').localeCompare(b.dayTimes?.[todayDow] || ''));
   const scheduledIds = new Set(scheduled.map((c) => c.id));
 
-  // 오늘자 출석 기록이 이미 있는(보강으로 추가됐던) 대상자는 새로고침 후에도 계속 보이도록 유지
+  // 그날 출석 기록이 이미 있는(보강으로 추가됐던) 대상자는 새로고침 후에도 계속 보이도록 유지
   Object.keys(data.attendance[key]).forEach((cid) => {
-    if (!scheduledIds.has(cid) && !extraTodayChildIds.includes(cid) && visible.some((c) => c.id === cid)) {
-      extraTodayChildIds.push(cid);
+    if (!scheduledIds.has(cid) && !extraIds.includes(cid) && visible.some((c) => c.id === cid)) {
+      extraIds.push(cid);
     }
   });
 
-  const extraChildren = extraTodayChildIds.map((cid) => visible.find((c) => c.id === cid)).filter(Boolean);
+  const extraChildren = extraIds.map((cid) => visible.find((c) => c.id === cid)).filter(Boolean);
   const todayChildren = [...scheduled, ...extraChildren];
 
   const list = document.getElementById('attendanceList');
@@ -1094,10 +1142,19 @@ function renderAttendance() {
   const makeupSelect = document.getElementById('makeupChildSelect');
 
   const todayIds = new Set(todayChildren.map((c) => c.id));
-  const makeupOptions = visible.filter((c) => !todayIds.has(c.id));
+  const makeupOptions = visible
+    .filter((c) => !todayIds.has(c.id))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
   makeupSelect.innerHTML =
     '<option value="">+ 보강 인원 추가</option>' +
     makeupOptions.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  makeupSelect.value = '';
+  makeupSelect.onchange = () => {
+    const cid = makeupSelect.value;
+    if (!cid) return;
+    extraChildIdsByDate[key].push(cid);
+    renderAttendance();
+  };
 
   if (!todayChildren.length) {
     list.innerHTML = '';
@@ -1176,18 +1233,10 @@ function renderAttendance() {
         }
         delete data.attendance[key][cid];
       }
-      extraTodayChildIds = extraTodayChildIds.filter((id) => id !== cid);
+      extraChildIdsByDate[key] = extraChildIdsByDate[key].filter((id) => id !== cid);
       renderAttendance();
     });
   });
-
-  makeupSelect.value = '';
-  makeupSelect.onchange = () => {
-    const cid = makeupSelect.value;
-    if (!cid) return;
-    extraTodayChildIds.push(cid);
-    renderAttendance();
-  };
 }
 
 function getFeeRecord(childId) {
@@ -1241,10 +1290,38 @@ const persistFeeRecordDebounced = debounce(persistFeeRecord, 600);
 function renderFees() {
   document.getElementById('feeMonthLabel').textContent = `${feeViewYear}년 ${feeViewMonth}월`;
   const list = document.getElementById('feesList');
-  const children = getVisibleChildren();
+  const checkboxWrap = document.getElementById('feesChildCheckboxes');
+  const allChildren = getVisibleChildren();
+
+  if (!allChildren.length) {
+    checkboxWrap.innerHTML = '';
+    list.innerHTML = '<p class="empty-msg">등록된 대상자가 없습니다.</p>';
+    return;
+  }
+
+  checkboxWrap.innerHTML = allChildren
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+    .map(
+      (c) => `
+      <label class="day-check">
+        <input type="checkbox" class="fees-child-checkbox" value="${c.id}" ${feesExcludedIds.has(c.id) ? '' : 'checked'}>
+        ${esc(c.name)}
+      </label>`
+    )
+    .join('');
+  checkboxWrap.querySelectorAll('.fees-child-checkbox').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) feesExcludedIds.delete(cb.value);
+      else feesExcludedIds.add(cb.value);
+      renderFees();
+    });
+  });
+
+  const children = allChildren.filter((c) => !feesExcludedIds.has(c.id));
 
   if (!children.length) {
-    list.innerHTML = '<p class="empty-msg">등록된 대상자가 없습니다.</p>';
+    list.innerHTML = '<p class="empty-msg">선택된 대상자가 없습니다. 위에서 대상자를 선택해 주세요.</p>';
     return;
   }
 
@@ -1446,7 +1523,8 @@ function renderSchedule() {
               </div>`;
             })
             .join('');
-          return `<td>${content}</td>`;
+          const gridClass = kids.length >= 2 ? 'schedule-cell-grid two-col' : 'schedule-cell-grid';
+          return `<td><div class="${gridClass}">${content}</div></td>`;
         })
         .join('');
       return `<tr><th>${t.slice(0, 5)}~${end}</th>${cells}</tr>`;
