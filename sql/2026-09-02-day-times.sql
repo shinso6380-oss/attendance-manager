@@ -3,10 +3,10 @@
 
 alter table children add column if not exists day_times jsonb;
 
--- 기존 아이들의 days + class_time(단일 시간)을 요일별 시간으로 변환
+-- 기존 아이들의 days(integer[]) + class_time(단일 시간)을 요일별 시간으로 변환
 update children
 set day_times = (
   select jsonb_object_agg(d::text, class_time)
-  from jsonb_array_elements(days) as d
+  from unnest(days) as d
 )
-where day_times is null and days is not null and jsonb_array_length(days) > 0;
+where day_times is null and days is not null and array_length(days, 1) > 0;

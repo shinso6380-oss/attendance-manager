@@ -577,9 +577,16 @@ function bindEvents() {
 
   document.getElementById('btnPrintAttendance').addEventListener('click', () => {
     document.getElementById('attPrintTitle').textContent = getAttendanceReportTitle();
+    setPrintPageSize('landscape');
     window.print();
   });
   document.getElementById('btnExportAttendanceExcel').addEventListener('click', exportMonthlyAttendanceExcel);
+
+  document.getElementById('btnPrintSchedule').addEventListener('click', () => {
+    document.getElementById('schedulePrintTitle').textContent = `${currentUser?.name || ''} 시간표 (월~토)`;
+    setPrintPageSize('portrait');
+    window.print();
+  });
 
   document.getElementById('closeHistoryModal').addEventListener('click', closeChildHistoryModal);
   document.getElementById('closeHistoryModalFooter').addEventListener('click', closeChildHistoryModal);
@@ -657,6 +664,16 @@ function renderChildHistory() {
         </tfoot>
       </table>
     </div>`;
+}
+
+function setPrintPageSize(orientation) {
+  let styleEl = document.getElementById('dynamicPrintPageStyle');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'dynamicPrintPageStyle';
+    document.head.appendChild(styleEl);
+  }
+  styleEl.textContent = `@page { size: A4 ${orientation}; margin: 10mm; }`;
 }
 
 function getAttendanceReportTitle() {

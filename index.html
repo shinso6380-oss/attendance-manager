@@ -76,8 +76,14 @@
       <section id="schedule" class="panel">
         <div class="panel-header">
           <h2 id="scheduleTitle">시간표 (월~토)</h2>
+          <div class="att-actions no-print">
+            <button class="btn btn-sm" id="btnPrintSchedule">🖨 인쇄 / PDF로 저장</button>
+          </div>
         </div>
-        <div id="scheduleTableWrap"></div>
+        <div id="schedulePrintArea">
+          <h3 id="schedulePrintTitle" class="print-only"></h3>
+          <div id="scheduleTableWrap"></div>
+        </div>
       </section>
 
       <section id="children" class="panel">

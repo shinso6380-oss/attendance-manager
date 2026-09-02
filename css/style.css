@@ -822,19 +822,17 @@ fieldset {
 .print-only { display: none; }
 
 @media print {
-  @page {
-    size: A4 landscape;
-    margin: 10mm;
-  }
-
   body * { visibility: hidden; }
 
   #attendancePrintArea,
-  #attendancePrintArea * {
+  #attendancePrintArea *,
+  #schedulePrintArea,
+  #schedulePrintArea * {
     visibility: visible;
   }
 
-  #attendancePrintArea {
+  #attendancePrintArea,
+  #schedulePrintArea {
     position: absolute;
     top: 0;
     left: 0;
@@ -847,7 +845,8 @@ fieldset {
     margin-bottom: .75rem;
   }
 
-  .payment-table-wrap {
+  .payment-table-wrap,
+  .schedule-table-wrap {
     border: none;
     overflow: visible;
   }
@@ -858,5 +857,9 @@ fieldset {
 
   .monthly-attendance-table .att-name {
     position: static;
+  }
+
+  .schedule-table {
+    font-size: 9pt;
   }
 }
