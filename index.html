@@ -54,7 +54,7 @@
         <button class="tab" data-tab="children">대상자 관리</button>
         <button class="tab" data-tab="fees">월 수업료 산정</button>
         <button class="tab" data-tab="monthlyAttendance">월 출석부</button>
-        <button class="tab hidden" data-tab="settings" id="tabSettings">비밀번호 관리</button>
+        <button class="tab hidden" data-tab="settings" id="tabSettings">선생님 관리</button>
       </nav>
     </header>
 
@@ -121,7 +121,15 @@
 
       <section id="settings" class="panel">
         <div class="panel-header">
-          <h2>선생님 비밀번호 관리</h2>
+          <h2>선생님 관리</h2>
+        </div>
+        <div class="teacher-add-row">
+          <input type="text" id="newTeacherName" placeholder="새 선생님 이름">
+          <label class="paid-check">
+            <input type="checkbox" id="newTeacherIsAdmin">
+            관리자 권한
+          </label>
+          <button type="button" class="btn btn-sm btn-primary" id="btnAddTeacher">+ 선생님 추가</button>
         </div>
         <div id="passwordList" class="password-list"></div>
       </section>
@@ -142,10 +150,6 @@
         <label class="field">
           <span>생년월일</span>
           <input type="date" name="birthDate">
-        </label>
-        <label class="field">
-          <span>수업 시간</span>
-          <input type="time" name="classTime" value="14:00">
         </label>
         <label class="field">
           <span>담당 선생님 *</span>
@@ -172,8 +176,8 @@
           <div id="infantSubOptions" class="radio-group"></div>
         </div>
         <fieldset class="field field-full">
-          <legend>수업 요일 *</legend>
-          <div class="day-checkboxes" id="dayCheckboxes"></div>
+          <legend>수업 요일 및 시간 * (요일별로 다르게 설정 가능)</legend>
+          <div class="day-time-rows" id="dayTimeRows"></div>
         </fieldset>
       </div>
       <div class="modal-footer">

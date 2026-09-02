@@ -1,7 +1,5 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const ADMIN = '신승오';
-const TEACHERS = ['신승오', '이희웅', '김윤수', '김다현', '김지영'];
 const DEFAULT_PASSWORD = '0000';
 
 const SUBJECTS = {
@@ -144,9 +142,7 @@ function getCopayAccountNote(child) {
 const SESSION_KEY = 'attendance-manager-session';
 
 function defaultData() {
-  const passwords = {};
-  TEACHERS.forEach((t) => { passwords[t] = DEFAULT_PASSWORD; });
-  return { children: [], attendance: {}, monthlyFees: {}, teacherPasswords: passwords };
+  return { children: [], attendance: {}, monthlyFees: {}, teachers: [] };
 }
 
 function getSession() {
@@ -166,7 +162,7 @@ function clearSession() {
 }
 
 function isAdmin() {
-  return currentUser?.name === ADMIN;
+  return !!data.teachers.find((t) => t.name === currentUser?.name)?.isAdmin;
 }
 
 function getVisibleChildren() {
@@ -190,6 +186,18 @@ function getDayLabels(days) {
     .slice()
     .sort((a, b) => a - b)
     .map((d) => DAYS.find((day) => day.value === d)?.label)
+    .join(', ');
+}
+
+function getDayTimeLabel(child) {
+  return (child.days || [])
+    .slice()
+    .sort((a, b) => a - b)
+    .map((d) => {
+      const label = DAYS.find((day) => day.value === d)?.label;
+      const time = (child.dayTimes?.[d] || '').slice(0, 5);
+      return time ? `${label} ${time}` : label;
+    })
     .join(', ');
 }
 
@@ -317,31 +325,43 @@ function debounce(fn, delay = 600) {
 }
 
 function rowToChild(row) {
+  let dayTimes = row.day_times || null;
+  let days;
+  if (dayTimes && Object.keys(dayTimes).length) {
+    days = Object.keys(dayTimes).map(Number);
+  } else {
+    // 요일별 시간(day_times)이 없는 옛 데이터: days + 단일 class_time에서 변환
+    days = row.days || [];
+    dayTimes = {};
+    days.forEach((d) => { dayTimes[d] = row.class_time || '14:00'; });
+  }
   return {
     id: row.id,
     name: row.name,
     birthDate: row.birth_date || '',
-    classTime: row.class_time || '',
     teacher: row.teacher,
     subject: row.subject,
     paymentTypes: row.payment_types || [],
     developmentalSub: row.developmental_sub || '',
     infantSub: row.infant_sub || '',
-    days: row.days || [],
+    days,
+    dayTimes,
   };
 }
 
 function childToRow(child) {
+  const days = Object.keys(child.dayTimes || {}).map(Number);
   return {
     name: child.name,
     birth_date: child.birthDate || null,
-    class_time: child.classTime || null,
     teacher: child.teacher,
     subject: child.subject,
     payment_types: child.paymentTypes,
     developmental_sub: child.paymentTypes.includes('developmental') ? (child.developmentalSub || null) : null,
     infant_sub: child.paymentTypes.includes('infant') ? (child.infantSub || null) : null,
-    days: child.days,
+    days,
+    day_times: child.dayTimes || {},
+    class_time: days.length ? child.dayTimes[days[0]] : null,
   };
 }
 
@@ -369,7 +389,7 @@ const childHistoryModal = document.getElementById('childHistoryModal');
 async function init() {
   populateLoginSelect();
   populateFormSelects();
-  renderDayCheckboxes();
+  renderDayTimeRows();
   bindEvents();
 
   try {
@@ -378,6 +398,9 @@ async function init() {
     console.error(err);
     alert('데이터를 불러오지 못했습니다. 인터넷 연결을 확인한 뒤 새로고침 해주세요.');
   }
+
+  populateLoginSelect();
+  populateFormSelects();
 
   loadingScreen.classList.add('hidden');
 
@@ -423,9 +446,11 @@ async function loadAllData() {
     };
   });
 
-  data.teacherPasswords = {};
-  TEACHERS.forEach((t) => { data.teacherPasswords[t] = DEFAULT_PASSWORD; });
-  (pwRes.data || []).forEach((row) => { data.teacherPasswords[row.teacher] = row.password; });
+  data.teachers = (pwRes.data || []).map((row) => ({
+    name: row.teacher,
+    password: row.password,
+    isAdmin: row.is_admin || false,
+  }));
 }
 
 function showLogin() {
@@ -445,16 +470,16 @@ function showApp() {
 function populateLoginSelect() {
   const sel = document.getElementById('loginUsername');
   sel.innerHTML = '<option value="">선택</option>';
-  TEACHERS.forEach((t) => {
-    sel.innerHTML += `<option value="${t}">${t}</option>`;
+  data.teachers.forEach((t) => {
+    sel.innerHTML += `<option value="${esc(t.name)}">${esc(t.name)}</option>`;
   });
 }
 
 function populateFormSelects() {
   const teacherSel = document.getElementById('teacherSelect');
   teacherSel.innerHTML = '<option value="">선택</option>';
-  TEACHERS.forEach((t) => {
-    teacherSel.innerHTML += `<option value="${t}">${t}</option>`;
+  data.teachers.forEach((t) => {
+    teacherSel.innerHTML += `<option value="${esc(t.name)}">${esc(t.name)}</option>`;
   });
   const subjectSel = childForm.querySelector('[name="subject"]');
   subjectSel.innerHTML = '<option value="">선택</option>';
@@ -463,14 +488,22 @@ function populateFormSelects() {
   });
 }
 
-function renderDayCheckboxes(container = document.getElementById('dayCheckboxes'), selected = []) {
-  container.innerHTML = DAYS.map(
-    (d) => `
-    <label class="day-check">
-      <input type="checkbox" name="days" value="${d.value}" ${selected.includes(d.value) ? 'checked' : ''}>
-      ${d.label}
-    </label>`
-  ).join('');
+function renderDayTimeRows(container = document.getElementById('dayTimeRows'), dayTimes = {}) {
+  const scheduleDays = DAYS.slice(1); // 월~토 (일요일 제외)
+  container.innerHTML = scheduleDays
+    .map((d) => {
+      const checked = dayTimes[d.value] !== undefined;
+      const time = dayTimes[d.value] || '14:00';
+      return `
+      <div class="day-time-row">
+        <label class="day-check">
+          <input type="checkbox" class="day-time-checkbox" data-day="${d.value}" ${checked ? 'checked' : ''}>
+          ${d.label}
+        </label>
+        <input type="time" class="day-time-input" data-day="${d.value}" value="${time}" ${checked ? '' : 'disabled'}>
+      </div>`;
+    })
+    .join('');
 }
 
 function renderPaymentTypeCheckboxes(container = document.getElementById('paymentTypeCheckboxes'), selected = []) {
@@ -486,6 +519,7 @@ function renderPaymentTypeCheckboxes(container = document.getElementById('paymen
 function bindEvents() {
   loginForm.addEventListener('submit', handleLogin);
   document.getElementById('btnLogout').addEventListener('click', handleLogout);
+  document.getElementById('btnAddTeacher').addEventListener('click', handleAddTeacher);
 
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => switchTab(tab.dataset.tab));
@@ -505,6 +539,13 @@ function bindEvents() {
       childForm.querySelectorAll('[name="infantSub"]').forEach((r) => { r.checked = false; });
     }
     updateVoucherSubFields();
+  });
+
+  document.getElementById('dayTimeRows').addEventListener('change', (e) => {
+    if (!e.target.classList.contains('day-time-checkbox')) return;
+    const row = e.target.closest('.day-time-row');
+    const timeInput = row.querySelector('.day-time-input');
+    timeInput.disabled = !e.target.checked;
   });
 
   document.getElementById('prevMonth').addEventListener('click', () => {
@@ -682,13 +723,13 @@ function handleLogin(e) {
   const username = fd.get('username');
   const password = fd.get('password');
 
-  if (!TEACHERS.includes(username)) {
+  const teacher = data.teachers.find((t) => t.name === username);
+  if (!teacher) {
     alert('등록되지 않은 선생님입니다.');
     return;
   }
 
-  const stored = data.teacherPasswords[username];
-  if (password !== stored) {
+  if (password !== teacher.password) {
     alert('비밀번호가 올바르지 않습니다.');
     return;
   }
@@ -703,6 +744,42 @@ function handleLogout() {
   clearSession();
   loginForm.reset();
   showLogin();
+}
+
+async function handleAddTeacher() {
+  const nameInput = document.getElementById('newTeacherName');
+  const adminCheckbox = document.getElementById('newTeacherIsAdmin');
+  const name = nameInput.value.trim();
+
+  if (!name) {
+    alert('선생님 이름을 입력해 주세요.');
+    return;
+  }
+  if (data.teachers.some((t) => t.name === name)) {
+    alert('이미 등록된 이름입니다.');
+    return;
+  }
+
+  const isAdminChecked = adminCheckbox.checked;
+  const btn = document.getElementById('btnAddTeacher');
+  btn.disabled = true;
+  const { error } = await supabaseClient
+    .from('teacher_passwords')
+    .insert({ teacher: name, password: DEFAULT_PASSWORD, is_admin: isAdminChecked });
+  btn.disabled = false;
+
+  if (error) {
+    console.error(error);
+    alert('추가 중 오류가 발생했습니다.');
+    return;
+  }
+
+  data.teachers.push({ name, password: DEFAULT_PASSWORD, isAdmin: isAdminChecked });
+  nameInput.value = '';
+  adminCheckbox.checked = false;
+  populateLoginSelect();
+  populateFormSelects();
+  renderPasswordSettings();
 }
 
 function switchTab(name) {
@@ -772,14 +849,13 @@ function openChildModal(child = null) {
   if (child) {
     childForm.querySelector('[name="name"]').value = child.name;
     childForm.querySelector('[name="birthDate"]').value = child.birthDate || '';
-    childForm.querySelector('[name="classTime"]').value = child.classTime || '14:00';
     teacherSel.value = child.teacher;
     childForm.querySelector('[name="subject"]').value = child.subject;
     renderPaymentTypeCheckboxes(document.getElementById('paymentTypeCheckboxes'), child.paymentTypes || []);
-    renderDayCheckboxes(document.getElementById('dayCheckboxes'), child.days || []);
+    renderDayTimeRows(document.getElementById('dayTimeRows'), child.dayTimes || {});
   } else {
     renderPaymentTypeCheckboxes(document.getElementById('paymentTypeCheckboxes'), []);
-    renderDayCheckboxes(document.getElementById('dayCheckboxes'), []);
+    renderDayTimeRows(document.getElementById('dayTimeRows'), {});
     if (!isAdmin()) {
       teacherSel.value = currentUser.name;
     }
@@ -809,9 +885,14 @@ function closeChildModal() {
 async function handleChildSubmit(e) {
   e.preventDefault();
   const fd = new FormData(childForm);
-  const days = [...childForm.querySelectorAll('[name="days"]:checked')].map((el) => Number(el.value));
+  const dayTimes = {};
+  childForm.querySelectorAll('.day-time-checkbox:checked').forEach((cb) => {
+    const day = Number(cb.dataset.day);
+    const timeInput = childForm.querySelector(`.day-time-input[data-day="${day}"]`);
+    dayTimes[day] = timeInput.value || '14:00';
+  });
 
-  if (!days.length) {
+  if (!Object.keys(dayTimes).length) {
     alert('수업 요일을 하나 이상 선택해 주세요.');
     return;
   }
@@ -835,13 +916,12 @@ async function handleChildSubmit(e) {
   const child = {
     name: fd.get('name').trim(),
     birthDate: fd.get('birthDate') || '',
-    classTime: fd.get('classTime') || '',
     teacher,
     subject: fd.get('subject'),
     paymentTypes,
     developmentalSub: paymentTypes.includes('developmental') ? developmentalSub : '',
     infantSub: paymentTypes.includes('infant') ? infantSub : '',
-    days,
+    dayTimes,
   };
 
   const submitBtn = childForm.querySelector('.modal-footer .btn-primary');
@@ -935,7 +1015,7 @@ function renderChildren() {
             <div class="child-name child-name-link" data-history="${c.id}">${esc(c.name)}</div>
             <div class="child-meta">
               ${c.birthDate ? `${esc(c.birthDate)} (${getAgeString(c.birthDate)}) · ` : ''}
-              ${getDayLabels(c.days)} ${c.classTime || ''} ·
+              ${getDayTimeLabel(c)} ·
               ${esc(c.teacher)} · ${SUBJECTS[c.subject]?.label}
             </div>
             <div class="child-meta">${paymentLabel}${voucherLabel}</div>
@@ -1011,7 +1091,7 @@ function renderAttendance() {
       return `
       <div class="card" data-child="${c.id}">
         <div class="child-name">${esc(c.name)}${isMakeup ? ' <span class="badge makeup-badge">보강</span>' : ''}</div>
-        <div class="child-meta">${c.classTime || ''} · ${esc(c.teacher)} · ${SUBJECTS[c.subject]?.label}</div>
+        <div class="child-meta">${(c.dayTimes?.[todayDow] || '').slice(0, 5)} · ${esc(c.teacher)} · ${SUBJECTS[c.subject]?.label}</div>
         <div class="attendance-row" style="margin-top:.75rem">
           <div class="status-btns">
             <button class="status-btn ${record.status === 'present' ? 'active-present' : ''}" data-status="present">출석</button>
@@ -1315,7 +1395,7 @@ function renderFees() {
 function renderSchedule() {
   document.getElementById('scheduleTitle').textContent = `${currentUser?.name || ''} 시간표 (월~토)`;
   const wrap = document.getElementById('scheduleTableWrap');
-  const children = getVisibleChildren().filter((c) => c.classTime);
+  const children = getVisibleChildren().filter((c) => c.dayTimes && Object.keys(c.dayTimes).length);
   const scheduleDays = DAYS.slice(1); // 월~토 (일요일 제외)
 
   if (!children.length) {
@@ -1323,14 +1403,14 @@ function renderSchedule() {
     return;
   }
 
-  const times = [...new Set(children.map((c) => c.classTime))].sort();
+  const times = [...new Set(children.flatMap((c) => Object.values(c.dayTimes).filter(Boolean)))].sort();
 
   const rows = times
     .map((t) => {
       const end = addMinutesToTime(t, CLASS_DURATION_MIN);
       const cells = scheduleDays
         .map((d) => {
-          const kids = children.filter((c) => c.classTime === t && c.days.includes(d.value));
+          const kids = children.filter((c) => c.dayTimes[d.value] === t);
           const content = kids
             .map((c) => {
               const voucherLabel = c.paymentTypes?.length
@@ -1458,22 +1538,25 @@ function renderMonthlyAttendance() {
 function renderPasswordSettings() {
   if (!isAdmin()) return;
   const list = document.getElementById('passwordList');
-  list.innerHTML = TEACHERS.map(
-    (t) => `
-    <div class="card password-row" data-teacher="${t}">
-      <div class="child-name">${esc(t)}${t === ADMIN ? ' <span class="badge">관리자</span>' : ''}</div>
+  list.innerHTML = data.teachers
+    .map(
+      (t) => `
+    <div class="card password-row" data-teacher="${esc(t.name)}">
+      <div class="child-name">${esc(t.name)}${t.isAdmin ? ' <span class="badge">관리자</span>' : ''}</div>
       <div class="password-form">
         <input type="password" class="pw-input" pattern="[0-9]{4}" maxlength="4" inputmode="numeric"
-          value="${esc(data.teacherPasswords[t] || DEFAULT_PASSWORD)}" placeholder="4자리">
+          value="${esc(t.password || DEFAULT_PASSWORD)}" placeholder="4자리">
         <button type="button" class="btn btn-sm btn-primary pw-save">저장</button>
+        ${t.name !== currentUser.name ? '<button type="button" class="btn btn-sm btn-danger teacher-delete">삭제</button>' : ''}
       </div>
     </div>`
-  ).join('');
+    )
+    .join('');
 
   list.querySelectorAll('.pw-save').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const row = btn.closest('.password-row');
-      const teacher = row.dataset.teacher;
+      const teacherName = row.dataset.teacher;
       const pw = row.querySelector('.pw-input').value;
       if (!/^\d{4}$/.test(pw)) {
         alert('비밀번호는 숫자 4자리여야 합니다.');
@@ -1484,7 +1567,7 @@ function renderPasswordSettings() {
       const { error } = await supabaseClient
         .from('teacher_passwords')
         .update({ password: pw })
-        .eq('teacher', teacher);
+        .eq('teacher', teacherName);
       btn.disabled = false;
 
       if (error) {
@@ -1493,8 +1576,36 @@ function renderPasswordSettings() {
         return;
       }
 
-      data.teacherPasswords[teacher] = pw;
-      alert(`${teacher} 선생님 비밀번호가 변경되었습니다.`);
+      const teacher = data.teachers.find((t) => t.name === teacherName);
+      if (teacher) teacher.password = pw;
+      alert(`${teacherName} 선생님 비밀번호가 변경되었습니다.`);
+    });
+  });
+
+  list.querySelectorAll('.teacher-delete').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const row = btn.closest('.password-row');
+      const teacherName = row.dataset.teacher;
+      const hasChildren = data.children.some((c) => c.teacher === teacherName);
+      const confirmMsg = hasChildren
+        ? `${teacherName} 선생님을 삭제할까요? 담당하던 대상자 기록은 그대로 남지만, 더 이상 로그인할 수 없게 됩니다.`
+        : `${teacherName} 선생님을 삭제할까요?`;
+      if (!confirm(confirmMsg)) return;
+
+      btn.disabled = true;
+      const { error } = await supabaseClient.from('teacher_passwords').delete().eq('teacher', teacherName);
+      btn.disabled = false;
+
+      if (error) {
+        console.error(error);
+        alert('삭제 중 오류가 발생했습니다.');
+        return;
+      }
+
+      data.teachers = data.teachers.filter((t) => t.name !== teacherName);
+      populateLoginSelect();
+      populateFormSelects();
+      renderPasswordSettings();
     });
   });
 }
