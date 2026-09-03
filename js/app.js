@@ -687,6 +687,7 @@ function bindEvents() {
   document.getElementById('btnExportAttendanceExcel').addEventListener('click', exportMonthlyAttendanceExcel);
 
   document.getElementById('btnPrintSchedule').addEventListener('click', printScheduleFitToPage);
+  document.getElementById('btnExportScheduleExcel').addEventListener('click', exportScheduleExcel);
 
   document.getElementById('closeHistoryModal').addEventListener('click', closeChildHistoryModal);
   document.getElementById('closeHistoryModalFooter').addEventListener('click', closeChildHistoryModal);
@@ -1785,6 +1786,74 @@ function renderSchedule() {
         <tbody>${rows}</tbody>
       </table>
     </div>`;
+}
+
+// 브라우저 인쇄 대신 엑셀로 내려받아 엑셀 자체의 "한 페이지에 맞춤" 인쇄 기능을 쓸 수 있게 한다.
+function exportScheduleExcel() {
+  const children = getVisibleChildren().filter((c) => c.dayTimes && Object.keys(c.dayTimes).length);
+  const scheduleDays = DAYS.slice(1); // 월~토
+  if (!children.length) {
+    alert('등록된 수업 시간이 없습니다.');
+    return;
+  }
+
+  const times = [...new Set(children.flatMap((c) => Object.values(c.dayTimes).filter(Boolean)))].sort();
+  const title = `${currentUser?.name || ''} 시간표 (월~토)`;
+  const totalCols = scheduleDays.length + 1;
+
+  const aoa = [];
+  aoa.push([title, ...Array(scheduleDays.length).fill('')]);
+  aoa.push(['시간', ...scheduleDays.map((d) => d.label)]);
+
+  times.forEach((t) => {
+    const end = addMinutesToTime(t, CLASS_DURATION_MIN);
+    const row = [`${t.slice(0, 5)}~${end}`];
+    scheduleDays.forEach((d) => {
+      const kids = children.filter((c) => c.dayTimes[d.value] === t);
+      const text = kids
+        .map((c) => {
+          const labels = c.paymentTypes?.length
+            ? c.paymentTypes.map((pt) => SCHEDULE_VOUCHER_LABELS[pt] || PAYMENT_TYPES[pt] || pt).join('/')
+            : PAYMENT_TYPES.none;
+          return `${c.name} (${labels})`;
+        })
+        .join('\n');
+      row.push(text);
+    });
+    aoa.push(row);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } }];
+  ws['!cols'] = [{ wch: 12 }, ...scheduleDays.map(() => ({ wch: 20 }))];
+  ws['!rows'] = aoa.map((_, i) => (i >= 2 ? { hpt: 46 } : undefined));
+
+  const thinBorder = { style: 'thin', color: { rgb: '000000' } };
+  const border = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };
+
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      if (!ws[addr]) ws[addr] = { t: 's', v: '' };
+      const isTitle = r === 0;
+      const isHeader = r === 1;
+      ws[addr].s = {
+        border,
+        alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+        font: { bold: isTitle || isHeader, sz: isTitle ? 13 : 11 },
+        fill: isHeader ? { fgColor: { rgb: 'F1F5F9' } } : undefined,
+      };
+    }
+  }
+
+  // 엑셀 자체의 "한 페이지에 맞춤" 인쇄가 기본으로 켜지도록 페이지 설정을 지정한다.
+  ws['!pageSetup'] = { orientation: 'landscape', fitToWidth: 1, fitToHeight: 1, paperSize: 9 };
+  ws['!fitToPage'] = true;
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '시간표');
+  XLSX.writeFile(wb, `${title}.xlsx`);
 }
 
 function getPaymentStatus(child, year, month) {
