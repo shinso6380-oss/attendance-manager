@@ -830,15 +830,16 @@ body { display: flex; align-items: center; justify-content: center; }
   table-layout: fixed;
   width: 100%;
   height: 100%;
-  font-size: 1rem;
+  font-size: .95rem;
 }
 #scheduleTableWrap .schedule-table th,
 #scheduleTableWrap .schedule-table td {
   vertical-align: middle;
+  overflow: hidden;
 }
 #scheduleTableWrap .schedule-table thead th,
 #scheduleTableWrap .schedule-table tbody th {
-  font-size: .95rem;
+  font-size: .9rem;
 }
 #scheduleTableWrap .schedule-table th:first-child,
 #scheduleTableWrap .schedule-table td:first-child {
@@ -847,6 +848,19 @@ body { display: flex; align-items: center; justify-content: center; }
 #scheduleTableWrap .schedule-table th:not(:first-child),
 #scheduleTableWrap .schedule-table td:not(:first-child) {
   width: calc((100% - 11%) / 6);
+}
+/* 칸이 고정 너비라 이름/바우처 태그가 옆으로 넘치지 않도록 칸 안에서 줄바꿈되게 함 */
+#scheduleTableWrap .schedule-child,
+#scheduleTableWrap .voucher-tag {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+#scheduleTableWrap .schedule-cell-grid.two-col {
+  grid-template-columns: 1fr 1fr;
+  min-width: 0;
+}
+#scheduleTableWrap .schedule-cell-grid.two-col .schedule-child {
+  min-width: 0;
 }
 </style>
 </head>
