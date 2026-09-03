@@ -38,7 +38,7 @@ const SCHEDULE_VOUCHER_LABELS = {
   developmental: '발달재활',
   infant: '영유아',
   'edu-therapy': '치료지원',
-  'edu-afterschool': '방과 후',
+  'edu-afterschool': '방과 후',
   sports: '스포츠',
 };
 
@@ -816,7 +816,7 @@ function printScheduleFitToPage() {
     return;
   }
 
-  const printMarginMm = 3;
+  const printMarginMm = 1;
   // 브라우저 인쇄 창이 CSS @page 방향을 자동으로 따라가지 않는 경우가 있어(실제로 세로로 인쇄됨),
   // 항상 세로로 인쇄된다고 가정하고 계산한다. (A4 세로: 210mm x 297mm)
   const pageWpx = (210 - printMarginMm * 2) * PRINT_MM_TO_PX;
