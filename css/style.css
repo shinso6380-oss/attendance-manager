@@ -170,6 +170,15 @@ body {
 .child-name { font-weight: 700; font-size: 1rem; }
 .child-meta { color: var(--text-muted); font-size: .85rem; margin-top: .15rem; }
 
+.makeup-time-select {
+  font-size: .85rem;
+  color: var(--text);
+  padding: 0 .2rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
 .child-name-link {
   cursor: pointer;
   width: fit-content;
