@@ -816,7 +816,7 @@ function printScheduleFitToPage() {
     return;
   }
 
-  const printMarginMm = 5;
+  const printMarginMm = 3;
   // 브라우저 인쇄 창이 CSS @page 방향을 자동으로 따라가지 않는 경우가 있어(실제로 세로로 인쇄됨),
   // 항상 세로로 인쇄된다고 가정하고 계산한다. (A4 세로: 210mm x 297mm)
   const pageWpx = (210 - printMarginMm * 2) * PRINT_MM_TO_PX;
