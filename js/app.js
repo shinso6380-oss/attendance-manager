@@ -184,6 +184,34 @@ function formatCurrency(n) {
   return Number(n).toLocaleString('ko-KR') + '원';
 }
 
+// 금액 입력란: 항상 10원 단위로 반올림 + "1,000원" 형식으로 표시
+function parseMoneyInputValue(str) {
+  const digits = String(str).replace(/[^\d-]/g, '');
+  const n = Number(digits) || 0;
+  return Math.round(n / 10) * 10;
+}
+
+function formatMoneyInputValue(n) {
+  return formatCurrency(parseMoneyInputValue(n));
+}
+
+function attachMoneyInputFormatting(el) {
+  el.addEventListener('input', () => {
+    const digits = el.value.replace(/[^\d-]/g, '');
+    el.value = digits ? Number(digits).toLocaleString('ko-KR') + '원' : '';
+  });
+}
+
+function generateTimeOptions(stepMinutes = 10) {
+  const options = [];
+  for (let m = 0; m < 24 * 60; m += stepMinutes) {
+    const hh = String(Math.floor(m / 60)).padStart(2, '0');
+    const mm = String(m % 60).padStart(2, '0');
+    options.push(`${hh}:${mm}`);
+  }
+  return options;
+}
+
 function formatDateKR(date) {
   const d = new Date(date);
   const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
@@ -303,6 +331,11 @@ function calculateMonthlyFee(child, sessionCount) {
   breakdown.push(`→ 추가금 납부액: ${formatCurrency(additionalPayment)}`);
 
   return { baseTotal, voucherDeduction, extra6Amount, extra7Amount, extraAmount, additionalPayment, copay, breakdown, rate };
+}
+
+// 이월 금액 차감은 추가납부액에서만 반영하고 본인부담금(copay)에는 영향을 주지 않는다.
+function getNetAdditionalPayment(fee, feeRec) {
+  return fee.additionalPayment - (feeRec?.carryoverAmount || 0);
 }
 
 function dateKey(date = new Date()) {
@@ -457,6 +490,7 @@ async function loadAllData() {
       additionalAmount: row.additional_amount ?? null,
       additionalPaid: row.additional_paid || false,
       additionalPaymentMethod: row.additional_payment_method || '',
+      carryoverAmount: row.carryover_amount || 0,
       copayDepositDate: row.copay_deposit_date || '',
       copayAmount: row.copay_amount ?? null,
       copayPaid: row.copay_paid || false,
@@ -508,17 +542,21 @@ function populateFormSelects() {
 
 function renderDayTimeRows(container = document.getElementById('dayTimeRows'), dayTimes = {}) {
   const scheduleDays = DAYS.slice(1); // 월~토 (일요일 제외)
+  const baseOptions = generateTimeOptions(10);
   container.innerHTML = scheduleDays
     .map((d) => {
       const checked = dayTimes[d.value] !== undefined;
       const time = dayTimes[d.value] || '14:00';
+      // 10분 단위가 아닌 옛 시간값도 목록에 끼워 넣어 수정 시 값이 사라지지 않게 함
+      const options = baseOptions.includes(time) ? baseOptions : [...baseOptions, time].sort();
+      const optionsHtml = options.map((t) => `<option value="${t}" ${t === time ? 'selected' : ''}>${t}</option>`).join('');
       return `
       <div class="day-time-row">
         <label class="day-check">
           <input type="checkbox" class="day-time-checkbox" data-day="${d.value}" ${checked ? 'checked' : ''}>
           ${d.label}
         </label>
-        <input type="time" class="day-time-input" data-day="${d.value}" value="${time}" step="600" ${checked ? '' : 'disabled'}>
+        <select class="day-time-input" data-day="${d.value}" ${checked ? '' : 'disabled'}>${optionsHtml}</select>
       </div>`;
     })
     .join('');
@@ -661,7 +699,7 @@ function getMonthlyFeeAmounts(childId, year, month) {
   const rec = data.monthlyFees[mk]?.[childId];
   const sessionCount = rec?.sessionCount ?? countSessionsInMonth(year, month, child.days);
   const fee = calculateMonthlyFee(child, sessionCount);
-  const additional = rec?.additionalAmount ?? fee.additionalPayment;
+  const additional = rec?.additionalAmount ?? getNetAdditionalPayment(fee, rec);
   const copay = rec?.copayAmount ?? fee.copay;
   return { additional, copay };
 }
@@ -1260,6 +1298,7 @@ function getFeeRecord(childId) {
       additionalAmount: null,
       additionalPaid: false,
       additionalPaymentMethod: '',
+      carryoverAmount: 0,
       copayDepositDate: '',
       copayAmount: null,
       copayPaid: false,
@@ -1281,6 +1320,7 @@ async function persistFeeRecord(childId) {
       additional_amount: rec.additionalAmount ?? null,
       additional_paid: rec.additionalPaid || false,
       additional_payment_method: rec.additionalPaymentMethod || null,
+      carryover_amount: rec.carryoverAmount || 0,
       copay_deposit_date: rec.copayDepositDate || null,
       copay_amount: rec.copayAmount ?? null,
       copay_paid: rec.copayPaid || false,
@@ -1341,14 +1381,15 @@ function renderFees() {
       const sessionCount = feeRec.sessionCount ?? autoCount;
       const fee = calculateMonthlyFee(c, sessionCount);
       const showCopay = needsCopayField(c);
+      const netAdditional = getNetAdditionalPayment(fee, feeRec);
 
       const paymentRows = [];
-      if (fee.additionalPayment !== 0) {
-        const isNegative = fee.additionalPayment < 0;
+      if (netAdditional !== 0) {
+        const isNegative = netAdditional < 0;
         paymentRows.push(`
           <tr>
             <td>추가납부액</td>
-            <td class="amount amount-strong${isNegative ? ' amount-negative' : ''}">${formatCurrency(fee.additionalPayment)}</td>
+            <td class="amount amount-strong${isNegative ? ' amount-negative' : ''}">${formatCurrency(netAdditional)}</td>
             <td>${esc(PAYMENT_ACCOUNTS.additional)}</td>
           </tr>`);
       }
@@ -1408,6 +1449,12 @@ function renderFees() {
           </div>` : ''}
         </div>
 
+        <div class="fee-input-row">
+          <label>이월 금액 차감</label>
+          <input type="text" inputmode="numeric" class="carryover-amount money-input" value="${formatMoneyInputValue(feeRec.carryoverAmount || 0)}" placeholder="0원">
+          <span class="text-muted">(추가납부액에서만 차감, 본인부담금엔 영향 없음)</span>
+        </div>
+
         ${paymentTableHtml}
 
         <ul class="fee-breakdown">${fee.breakdown.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>
@@ -1416,7 +1463,7 @@ function renderFees() {
           <div class="fee-input-row">
             <label>추가금 입금일</label>
             <input type="date" class="additional-date" value="${feeRec.additionalDepositDate || ''}">
-            <input type="number" class="additional-amount" value="${feeRec.additionalAmount ?? fee.additionalPayment}" placeholder="추가납부액">
+            <input type="text" inputmode="numeric" class="additional-amount money-input" value="${formatMoneyInputValue(feeRec.additionalAmount ?? netAdditional)}" placeholder="추가납부액">
             <select class="additional-method">
               <option value="">결제 수단</option>
               ${Object.entries(PAYMENT_METHODS)
@@ -1432,7 +1479,7 @@ function renderFees() {
           <div class="fee-input-row">
             <label>본인부담금 입금일</label>
             <input type="date" class="copay-date" value="${feeRec.copayDepositDate || ''}">
-            <input type="number" class="copay-amount" value="${feeRec.copayAmount ?? fee.copay}" placeholder="본인부담금">
+            <input type="text" inputmode="numeric" class="copay-amount money-input" value="${formatMoneyInputValue(feeRec.copayAmount ?? fee.copay)}" placeholder="본인부담금">
             <label class="paid-check">
               <input type="checkbox" class="copay-paid" ${feeRec.copayPaid ? 'checked' : ''}>
               납부 확인
@@ -1465,8 +1512,16 @@ function renderFees() {
     });
 
     card.querySelector('.additional-amount')?.addEventListener('change', async (e) => {
-      getFeeRecord(cid).additionalAmount = Number(e.target.value) || 0;
+      getFeeRecord(cid).additionalAmount = parseMoneyInputValue(e.target.value);
+      e.target.value = formatMoneyInputValue(getFeeRecord(cid).additionalAmount);
       await persistFeeRecord(cid);
+    });
+
+    card.querySelector('.carryover-amount')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).carryoverAmount = parseMoneyInputValue(e.target.value);
+      e.target.value = formatMoneyInputValue(getFeeRecord(cid).carryoverAmount);
+      await persistFeeRecord(cid);
+      renderFees();
     });
 
     card.querySelector('.additional-method')?.addEventListener('change', async (e) => {
@@ -1485,7 +1540,8 @@ function renderFees() {
     });
 
     card.querySelector('.copay-amount')?.addEventListener('change', async (e) => {
-      getFeeRecord(cid).copayAmount = Number(e.target.value) || 0;
+      getFeeRecord(cid).copayAmount = parseMoneyInputValue(e.target.value);
+      e.target.value = formatMoneyInputValue(getFeeRecord(cid).copayAmount);
       await persistFeeRecord(cid);
     });
 
@@ -1498,6 +1554,8 @@ function renderFees() {
       getFeeRecord(cid).notes = e.target.value;
       persistFeeRecordDebounced(cid);
     });
+
+    card.querySelectorAll('.money-input').forEach((el) => attachMoneyInputFormatting(el));
   });
 }
 
@@ -1557,7 +1615,7 @@ function getPaymentStatus(child, year, month) {
   const sessionCount = feeRec?.sessionCount ?? countSessionsInMonth(year, month, child.days);
   const fee = calculateMonthlyFee(child, sessionCount);
 
-  const needsAdditional = fee.additionalPayment > 0;
+  const needsAdditional = getNetAdditionalPayment(fee, feeRec) > 0;
   const needsCopay = needsCopayField(child) && fee.copay > 0;
   if (!needsAdditional && !needsCopay) return null;
 
