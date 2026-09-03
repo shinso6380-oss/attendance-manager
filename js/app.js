@@ -824,6 +824,30 @@ body { display: flex; align-items: center; justify-content: center; }
 #schedulePrintArea { position: static !important; width: auto !important; display: flex !important; flex-direction: column; align-items: center; }
 #schedulePrintTitle { display: block !important; text-align: center; margin: 0 0 .5rem; }
 #scheduleScaleWrap { display: flex; align-items: center; justify-content: center; }
+/* 요일 칸 너비를 동일하게 맞추고 글씨를 키우며, 표가 인쇄 영역 세로를 최대한 채우도록 함 */
+#scheduleTableWrap .payment-table-wrap { width: 100%; height: 100%; }
+#scheduleTableWrap .schedule-table {
+  table-layout: fixed;
+  width: 100%;
+  height: 100%;
+  font-size: 1rem;
+}
+#scheduleTableWrap .schedule-table th,
+#scheduleTableWrap .schedule-table td {
+  vertical-align: middle;
+}
+#scheduleTableWrap .schedule-table thead th,
+#scheduleTableWrap .schedule-table tbody th {
+  font-size: .95rem;
+}
+#scheduleTableWrap .schedule-table th:first-child,
+#scheduleTableWrap .schedule-table td:first-child {
+  width: 11%;
+}
+#scheduleTableWrap .schedule-table th:not(:first-child),
+#scheduleTableWrap .schedule-table td:not(:first-child) {
+  width: calc((100% - 11%) / 6);
+}
 </style>
 </head>
 <body>
@@ -844,26 +868,34 @@ body { display: flex; align-items: center; justify-content: center; }
   win.addEventListener('afterprint', () => win.close());
 }
 
-// 팝업 창 안의 표를 실측하여 A4 한 장에 들어가도록 축소 비율을 계산해 적용한다.
+// 팝업 창 안의 표를 A4 페이지 크기에 맞춘다.
+// 1) 인쇄 영역을 페이지 크기(px)에 정확히 맞춰 표가 세로까지 최대한 채워지게 하고
+//    (표 높이가 100%로 지정되어 있으므로 내용이 적으면 행이 넓게 늘어나 빈 공간을 채운다)
+// 2) 그래도 내용이 많아 페이지 크기를 넘으면 그만큼만 zoom으로 축소한다.
+//    (transform: scale()은 화면에 보이는 크기만 줄이고 실제 레이아웃 크기는 그대로라
+//     인쇄 시 페이지가 나뉘거나 정렬이 어긋나므로, 레이아웃 자체를 줄여주는 zoom을 사용한다.)
 function fitElementToPageInWindow(win, marginMm) {
   const doc = win.document;
   const content = doc.getElementById('scheduleTableWrap');
+  const table = doc.querySelector('#scheduleTableWrap .schedule-table');
   const titleEl = doc.getElementById('schedulePrintTitle');
-  if (!content) return;
+  if (!content || !table) return;
 
   content.style.zoom = '1';
-  const naturalWidth = content.scrollWidth;
-  const naturalHeight = content.scrollHeight;
   const titleHeight = titleEl ? titleEl.offsetHeight + 8 : 0;
-
   const pageWpx = (210 - marginMm * 2) * PRINT_MM_TO_PX;
   const pageHpx = (297 - marginMm * 2) * PRINT_MM_TO_PX - titleHeight;
 
-  // transform: scale()는 화면에 보이는 크기만 줄이고 실제 레이아웃 크기는 그대로라
-  // 인쇄 시 페이지가 나뉘거나 정렬이 어긋난다. zoom은 레이아웃 자체를 줄여주므로
-  // 항상 실제로 A4 한 장 안에 들어가고 가운데 정렬도 정확히 맞는다.
-  const scale = Math.min(1, pageWpx / naturalWidth, pageHpx / naturalHeight);
-  content.style.zoom = String(scale);
+  content.style.width = `${pageWpx}px`;
+  content.style.height = `${pageHpx}px`;
+
+  // content(스케일 대상)가 flex 아이템이라 overflow:visible 상태에서는 scrollHeight가
+  // 실제로 넘친 만큼을 반영하지 못하는 경우가 있어, 실제 표 요소의 렌더링 크기를 직접 측정한다.
+  const rect = table.getBoundingClientRect();
+  const scale = Math.min(1, pageWpx / rect.width, pageHpx / rect.height);
+  if (scale < 1) {
+    content.style.zoom = String(scale);
+  }
 }
 
 function getAttendanceReportTitle() {
