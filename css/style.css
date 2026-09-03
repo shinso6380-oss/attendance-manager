@@ -439,6 +439,7 @@ body {
   flex-direction: column;
   padding: .2rem 0;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .schedule-cell-grid:not(.two-col) .schedule-child + .schedule-child {
@@ -466,6 +467,7 @@ body {
   display: inline-block;
   padding: .05rem .35rem;
   border-radius: 3px;
+  white-space: nowrap;
 }
 
 .voucher-tag-edu-therapy {
@@ -944,5 +946,10 @@ fieldset {
 
   .schedule-table {
     font-size: 9pt;
+  }
+
+  .schedule-child,
+  .voucher-tag {
+    white-space: normal;
   }
 }
