@@ -797,6 +797,12 @@ function getMainStylesheetText() {
 
 // 시간표는 인쇄할 때 메인 화면의 다른 탭/헤더와 얽히지 않도록 별도의 인쇄 전용 창을 띄워
 // 그 창 안에서만 A4 세로 1장에 맞춰 축소 + 가운데 정렬한 뒤 인쇄한다.
+//
+// 축소/측정 스크립트를 여는 쪽(opener)이 아니라 새 창 자신의 <script>로 실행한다.
+// opener 쪽에서 다른 창의 스타일을 조작한 직후 곧바로 print()를 호출하면, 브라우저가
+// 그 변경 사항을 인쇄용으로 확정(commit)하기 전에 인쇄 스냅샷을 떠버리는 경우가 있어
+// (그러면 축소 계산은 맞는데도 실제 인쇄물엔 반영 전 크기로 나가 페이지가 넘어감),
+// 새 창이 스스로 로드→레이아웃 확정까지 기다렸다가 스스로 축소하고 스스로 인쇄하게 한다.
 function printScheduleFitToPage() {
   const tableWrap = document.getElementById('scheduleTableWrap');
   if (!tableWrap) return;
@@ -810,6 +816,11 @@ function printScheduleFitToPage() {
   }
 
   const printMarginMm = 5;
+  // 브라우저 인쇄 창이 CSS @page 방향을 자동으로 따라가지 않는 경우가 있어(실제로 세로로 인쇄됨),
+  // 항상 세로로 인쇄된다고 가정하고 계산한다. (A4 세로: 210mm x 297mm)
+  const pageWpx = (210 - printMarginMm * 2) * PRINT_MM_TO_PX;
+  const pageHpxBase = (297 - printMarginMm * 2) * PRINT_MM_TO_PX;
+
   win.document.open();
   win.document.write(`<!DOCTYPE html>
 <html lang="ko">
@@ -876,52 +887,46 @@ body { display: flex; align-items: center; justify-content: center; }
     <h3 id="schedulePrintTitle">${esc(title)}</h3>
     <div id="scheduleScaleWrap"><div id="scheduleTableWrap">${tableWrap.innerHTML}</div></div>
   </div>
+  <script>
+  (function () {
+    var content = document.getElementById('scheduleTableWrap');
+    var table = document.querySelector('#scheduleTableWrap .schedule-table');
+    var titleEl = document.getElementById('schedulePrintTitle');
+    var pageWpx = ${pageWpx};
+    var pageHpxBase = ${pageHpxBase};
+    var SAFETY_MARGIN = 0.9;
+
+    function fit() {
+      content.style.zoom = '1';
+      var titleHeight = titleEl ? (titleEl.offsetHeight + 8) : 0;
+      var pageHpx = pageHpxBase - titleHeight;
+      content.style.width = pageWpx + 'px';
+      content.style.height = pageHpx + 'px';
+      var rect = table.getBoundingClientRect();
+      var scale = Math.min(1, (pageWpx * SAFETY_MARGIN) / rect.width, (pageHpx * SAFETY_MARGIN) / rect.height);
+      if (scale < 1) content.style.zoom = String(scale);
+    }
+
+    var done = false;
+    function run() {
+      if (done) return;
+      done = true;
+      fit();
+      window.focus();
+      window.print();
+    }
+    // 레이아웃이 실제로 확정된 뒤에 측정/인쇄하도록 프레임을 두 번 넘겨 기다리되,
+    // 혹시 프레임 이벤트가 발생하지 않는 환경을 대비해 타임아웃도 함께 건다.
+    window.requestAnimationFrame(function () {
+      window.requestAnimationFrame(run);
+    });
+    setTimeout(run, 300);
+    window.addEventListener('afterprint', function () { window.close(); });
+  })();
+  <\/script>
 </body>
 </html>`);
   win.document.close();
-
-  // 스타일을 문서에 직접 박아 넣었으므로 외부 리소스 로딩을 기다릴 필요가 없고,
-  // scrollWidth/scrollHeight를 읽는 순간 레이아웃이 즉시 계산되므로 비동기로 기다릴 필요도 없다.
-  // (requestAnimationFrame은 새로 열린/보이지 않는 창에서는 지연되거나 아예 발생하지 않을 수 있어 사용하지 않는다.)
-  fitElementToPageInWindow(win, printMarginMm);
-  win.focus();
-  win.print();
-  win.addEventListener('afterprint', () => win.close());
-}
-
-// 팝업 창 안의 표를 A4 페이지 크기에 맞춘다.
-// 1) 인쇄 영역을 페이지 크기(px)에 정확히 맞춰 표가 세로까지 최대한 채워지게 하고
-//    (표 높이가 100%로 지정되어 있으므로 내용이 적으면 행이 넓게 늘어나 빈 공간을 채운다)
-// 2) 그래도 내용이 많아 페이지 크기를 넘으면 그만큼만 zoom으로 축소한다.
-//    (transform: scale()은 화면에 보이는 크기만 줄이고 실제 레이아웃 크기는 그대로라
-//     인쇄 시 페이지가 나뉘거나 정렬이 어긋나므로, 레이아웃 자체를 줄여주는 zoom을 사용한다.)
-function fitElementToPageInWindow(win, marginMm) {
-  const doc = win.document;
-  const content = doc.getElementById('scheduleTableWrap');
-  const table = doc.querySelector('#scheduleTableWrap .schedule-table');
-  const titleEl = doc.getElementById('schedulePrintTitle');
-  if (!content || !table) return;
-
-  content.style.zoom = '1';
-  const titleHeight = titleEl ? titleEl.offsetHeight + 8 : 0;
-  // 브라우저 인쇄 창이 CSS @page 방향을 자동으로 따라가지 않는 경우가 있어(실제로 세로로 인쇄됨),
-  // 항상 세로로 인쇄된다고 가정하고 계산한다. (A4 세로: 210mm x 297mm)
-  const pageWpx = (210 - marginMm * 2) * PRINT_MM_TO_PX;
-  const pageHpx = (297 - marginMm * 2) * PRINT_MM_TO_PX - titleHeight;
-
-  content.style.width = `${pageWpx}px`;
-  content.style.height = `${pageHpx}px`;
-
-  // content(스케일 대상)가 flex 아이템이라 overflow:visible 상태에서는 scrollHeight가
-  // 실제로 넘친 만큼을 반영하지 못하는 경우가 있어, 실제 표 요소의 렌더링 크기를 직접 측정한다.
-  const rect = table.getBoundingClientRect();
-  // 실제 인쇄 엔진의 계산은 이 측정값과 완전히 똑같지 않을 수 있어(글꼴/반올림 오차 등),
-  // 여유 공간을 조금 남겨 두어야 페이지가 넘어가는 사고를 확실히 막을 수 있다.
-  const SAFETY_MARGIN = 0.9;
-  const scale = Math.min(1, (pageWpx * SAFETY_MARGIN) / rect.width, (pageHpx * SAFETY_MARGIN) / rect.height);
-  if (scale < 1) {
-    content.style.zoom = String(scale);
-  }
 }
 
 function getAttendanceReportTitle() {
