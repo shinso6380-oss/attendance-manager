@@ -499,16 +499,19 @@ body {
 }
 
 .monthly-attendance-table .att-name {
-  min-width: 90px;
+  min-width: 150px;
   text-align: left;
   position: sticky;
   left: 0;
   background: var(--bg);
   z-index: 1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .3rem;
 }
 
 .att-count {
-  display: block;
   font-weight: 400;
   font-size: .65rem;
   color: var(--text-muted);
@@ -516,7 +519,6 @@ body {
 
 .att-payment-badge {
   display: inline-block;
-  margin-top: .15rem;
   padding: .05rem .35rem;
   border-radius: 999px;
   font-size: .6rem;
