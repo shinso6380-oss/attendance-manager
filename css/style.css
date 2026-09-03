@@ -459,6 +459,7 @@ body {
   font-size: .7rem;
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: .2rem;
   margin-top: .1rem;
 }
@@ -487,7 +488,7 @@ body {
 
 .voucher-tag-developmental {
   color: #000;
-  background: #9ca3af;
+  background: #d1d5db;
 }
 
 .monthly-attendance-table th,
