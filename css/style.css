@@ -566,6 +566,11 @@ body {
   line-height: 1.3;
 }
 
+.monthly-attendance-table .att-absent.has-reason {
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
 .monthly-attendance-table .att-noclass {
   background: #f8fafc;
 }
