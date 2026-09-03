@@ -546,10 +546,19 @@ function populateSubjectSelect(teacherName) {
   const subjectSel = childForm.querySelector('[name="subject"]');
   const current = subjectSel.value;
   const options = getSubjectsForTeacher(teacherName);
+  const keys = Object.keys(options);
   subjectSel.innerHTML =
     '<option value="">선택</option>' +
     Object.entries(options).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('');
   if (options[current]) subjectSel.value = current;
+
+  // 선생님별로 과목이 하나뿐이므로 담당 선생님 칸처럼 자동 선택 후 고정한다.
+  if (keys.length === 1) {
+    subjectSel.value = keys[0];
+    subjectSel.disabled = true;
+  } else {
+    subjectSel.disabled = false;
+  }
 }
 
 function renderDayTimeRows(container = document.getElementById('dayTimeRows'), dayTimes = {}) {
@@ -770,13 +779,29 @@ function setPrintPageSize(orientation) {
 const PRINT_MM_TO_PX = 96 / 25.4;
 const PRINT_MARGIN_MM = 10;
 
+// 현재 문서에 이미 로드되어 있는 style.css의 실제 규칙 텍스트를 그대로 가져온다.
+// (인쇄 팝업에서 <link>로 다시 불러오면 네트워크 로딩이 끝나기 전에 크기를 측정해버려
+//  축소 비율이 틀어지는 문제가 있었음 — 이미 로드된 내용을 그대로 인라인하면 그 문제가 없다.)
+function getMainStylesheetText() {
+  for (const sheet of document.styleSheets) {
+    try {
+      if (sheet.href && sheet.href.includes('style.css')) {
+        return [...sheet.cssRules].map((r) => r.cssText).join('\n');
+      }
+    } catch (e) {
+      // 접근 불가한(교차 출처) 스타일시트는 건너뜀
+    }
+  }
+  return '';
+}
+
 // 시간표는 인쇄할 때 메인 화면의 다른 탭/헤더와 얽히지 않도록 별도의 인쇄 전용 창을 띄워
 // 그 창 안에서만 A4 세로 1장에 맞춰 축소 + 가운데 정렬한 뒤 인쇄한다.
 function printScheduleFitToPage() {
   const tableWrap = document.getElementById('scheduleTableWrap');
   if (!tableWrap) return;
   const title = `${currentUser?.name || ''} 시간표 (월~토)`;
-  const cssHref = new URL('css/style.css', document.baseURI).href;
+  const cssText = getMainStylesheetText();
 
   const win = window.open('', '_blank');
   if (!win) {
@@ -791,14 +816,14 @@ function printScheduleFitToPage() {
 <head>
 <meta charset="UTF-8">
 <title>${esc(title)}</title>
-<link rel="stylesheet" href="${cssHref}">
 <style>
-  @page { size: A4 portrait; margin: ${printMarginMm}mm; }
-  html, body { margin: 0; padding: 0; height: 100%; }
-  body { display: flex; align-items: center; justify-content: center; }
-  #schedulePrintArea { position: static !important; width: auto !important; display: flex !important; flex-direction: column; align-items: center; }
-  #schedulePrintTitle { display: block !important; text-align: center; margin: 0 0 .5rem; }
-  #scheduleScaleWrap { display: flex; align-items: center; justify-content: center; }
+${cssText}
+@page { size: A4 portrait; margin: ${printMarginMm}mm; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body { display: flex; align-items: center; justify-content: center; }
+#schedulePrintArea { position: static !important; width: auto !important; display: flex !important; flex-direction: column; align-items: center; }
+#schedulePrintTitle { display: block !important; text-align: center; margin: 0 0 .5rem; }
+#scheduleScaleWrap { display: flex; align-items: center; justify-content: center; }
 </style>
 </head>
 <body>
@@ -810,13 +835,12 @@ function printScheduleFitToPage() {
 </html>`);
   win.document.close();
 
-  win.addEventListener('load', () => {
-    setTimeout(() => {
-      fitElementToPageInWindow(win, printMarginMm);
-      win.focus();
-      win.print();
-    }, 150);
-  });
+  // 스타일을 문서에 직접 박아 넣었으므로 외부 리소스 로딩을 기다릴 필요가 없고,
+  // scrollWidth/scrollHeight를 읽는 순간 레이아웃이 즉시 계산되므로 비동기로 기다릴 필요도 없다.
+  // (requestAnimationFrame은 새로 열린/보이지 않는 창에서는 지연되거나 아예 발생하지 않을 수 있어 사용하지 않는다.)
+  fitElementToPageInWindow(win, printMarginMm);
+  win.focus();
+  win.print();
   win.addEventListener('afterprint', () => win.close());
 }
 
@@ -1109,7 +1133,8 @@ async function handleChildSubmit(e) {
     name: fd.get('name').trim(),
     birthDate: fd.get('birthDate') || '',
     teacher,
-    subject: fd.get('subject'),
+    // 과목 select가 잠겨 있으면(선택지가 하나뿐) FormData에 값이 실리지 않으므로 DOM 값을 직접 읽는다.
+    subject: fd.get('subject') || childForm.querySelector('[name="subject"]').value,
     paymentTypes,
     developmentalSub: paymentTypes.includes('developmental') ? developmentalSub : '',
     infantSub: paymentTypes.includes('infant') ? infantSub : '',
