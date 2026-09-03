@@ -837,17 +837,22 @@ body { display: flex; align-items: center; justify-content: center; }
   vertical-align: middle;
   overflow: hidden;
 }
-#scheduleTableWrap .schedule-table thead th,
-#scheduleTableWrap .schedule-table tbody th {
+#scheduleTableWrap .schedule-table thead th {
   font-size: .9rem;
+}
+#scheduleTableWrap .schedule-table tbody th {
+  font-size: .8rem;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 #scheduleTableWrap .schedule-table th:first-child,
 #scheduleTableWrap .schedule-table td:first-child {
-  width: 11%;
+  width: 14%;
 }
 #scheduleTableWrap .schedule-table th:not(:first-child),
 #scheduleTableWrap .schedule-table td:not(:first-child) {
-  width: calc((100% - 11%) / 6);
+  width: calc((100% - 14%) / 6);
 }
 /* 칸이 고정 너비라 이름/바우처 태그가 옆으로 넘치지 않도록 칸 안에서 줄바꿈되게 함 */
 #scheduleTableWrap .schedule-child,
@@ -855,11 +860,13 @@ body { display: flex; align-items: center; justify-content: center; }
   white-space: normal;
   overflow-wrap: break-word;
 }
-#scheduleTableWrap .schedule-cell-grid.two-col {
-  grid-template-columns: 1fr 1fr;
+#scheduleTableWrap .schedule-cell-grid {
   min-width: 0;
 }
-#scheduleTableWrap .schedule-cell-grid.two-col .schedule-child {
+#scheduleTableWrap .schedule-cell-grid.two-col {
+  grid-template-columns: 1fr 1fr;
+}
+#scheduleTableWrap .schedule-cell-grid .schedule-child {
   min-width: 0;
 }
 </style>
@@ -906,7 +913,10 @@ function fitElementToPageInWindow(win, marginMm) {
   // content(스케일 대상)가 flex 아이템이라 overflow:visible 상태에서는 scrollHeight가
   // 실제로 넘친 만큼을 반영하지 못하는 경우가 있어, 실제 표 요소의 렌더링 크기를 직접 측정한다.
   const rect = table.getBoundingClientRect();
-  const scale = Math.min(1, pageWpx / rect.width, pageHpx / rect.height);
+  // 실제 인쇄 엔진의 계산은 이 측정값과 완전히 똑같지 않을 수 있어(글꼴/반올림 오차 등),
+  // 여유 공간을 조금 남겨 두어야 페이지가 넘어가는 사고를 확실히 막을 수 있다.
+  const SAFETY_MARGIN = 0.9;
+  const scale = Math.min(1, (pageWpx * SAFETY_MARGIN) / rect.width, (pageHpx * SAFETY_MARGIN) / rect.height);
   if (scale < 1) {
     content.style.zoom = String(scale);
   }
