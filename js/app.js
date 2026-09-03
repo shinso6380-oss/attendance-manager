@@ -818,7 +818,7 @@ function printScheduleFitToPage() {
 <title>${esc(title)}</title>
 <style>
 ${cssText}
-@page { size: A4 portrait; margin: ${printMarginMm}mm; }
+@page { size: A4 landscape; margin: ${printMarginMm}mm; }
 html, body { margin: 0; padding: 0; height: 100%; }
 body { display: flex; align-items: center; justify-content: center; }
 #schedulePrintArea { position: static !important; width: auto !important; display: flex !important; flex-direction: column; align-items: center; }
@@ -904,8 +904,9 @@ function fitElementToPageInWindow(win, marginMm) {
 
   content.style.zoom = '1';
   const titleHeight = titleEl ? titleEl.offsetHeight + 8 : 0;
-  const pageWpx = (210 - marginMm * 2) * PRINT_MM_TO_PX;
-  const pageHpx = (297 - marginMm * 2) * PRINT_MM_TO_PX - titleHeight;
+  // A4 가로 방향(297mm x 210mm)
+  const pageWpx = (297 - marginMm * 2) * PRINT_MM_TO_PX;
+  const pageHpx = (210 - marginMm * 2) * PRINT_MM_TO_PX - titleHeight;
 
   content.style.width = `${pageWpx}px`;
   content.style.height = `${pageHpx}px`;
