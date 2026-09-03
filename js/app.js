@@ -425,7 +425,7 @@ let historyYear = new Date().getFullYear();
 let extraChildIdsByDate = {};
 let childrenSortMode = 'recent';
 let attendanceViewDate = new Date();
-let feesExcludedIds = new Set();
+let feesIncludedIds = new Set(); // 기본값: 아무도 선택 안 됨 (필요한 친구만 직접 선택)
 
 const loadingScreen = document.getElementById('loadingScreen');
 const loginScreen = document.getElementById('loginScreen');
@@ -627,11 +627,11 @@ function bindEvents() {
   });
 
   document.getElementById('btnFeesSelectAll').addEventListener('click', () => {
-    feesExcludedIds.clear();
+    feesIncludedIds = new Set(getVisibleChildren().map((c) => c.id));
     renderFees();
   });
   document.getElementById('btnFeesSelectNone').addEventListener('click', () => {
-    feesExcludedIds = new Set(getVisibleChildren().map((c) => c.id));
+    feesIncludedIds.clear();
     renderFees();
   });
 
@@ -1592,20 +1592,20 @@ function renderFees() {
     .map(
       (c) => `
       <label class="day-check">
-        <input type="checkbox" class="fees-child-checkbox" value="${c.id}" ${feesExcludedIds.has(c.id) ? '' : 'checked'}>
+        <input type="checkbox" class="fees-child-checkbox" value="${c.id}" ${feesIncludedIds.has(c.id) ? 'checked' : ''}>
         ${esc(c.name)}
       </label>`
     )
     .join('');
   checkboxWrap.querySelectorAll('.fees-child-checkbox').forEach((cb) => {
     cb.addEventListener('change', () => {
-      if (cb.checked) feesExcludedIds.delete(cb.value);
-      else feesExcludedIds.add(cb.value);
+      if (cb.checked) feesIncludedIds.add(cb.value);
+      else feesIncludedIds.delete(cb.value);
       renderFees();
     });
   });
 
-  const children = allChildren.filter((c) => !feesExcludedIds.has(c.id));
+  const children = allChildren.filter((c) => feesIncludedIds.has(c.id));
 
   if (!children.length) {
     list.innerHTML = '<p class="empty-msg">선택된 대상자가 없습니다. 위에서 대상자를 선택해 주세요.</p>';
