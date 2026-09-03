@@ -1789,6 +1789,16 @@ function renderSchedule() {
 }
 
 // 브라우저 인쇄 대신 엑셀로 내려받아 엑셀 자체의 "한 페이지에 맞춤" 인쇄 기능을 쓸 수 있게 한다.
+// 시간표 화면의 바우처 태그 배경색과 맞춘 엑셀 채우기 색
+const SCHEDULE_VOUCHER_FILL_COLORS = {
+  developmental: '9CA3AF',
+  'edu-therapy': 'FDBA74',
+  'edu-afterschool': 'FBCFE8',
+  sports: '7DD3FC',
+  infant: 'E5E7EB',
+  none: 'FFFFFF',
+};
+
 function exportScheduleExcel() {
   const children = getVisibleChildren().filter((c) => c.dayTimes && Object.keys(c.dayTimes).length);
   const scheduleDays = DAYS.slice(1); // 월~토
@@ -1805,28 +1815,41 @@ function exportScheduleExcel() {
   aoa.push([title, ...Array(scheduleDays.length).fill('')]);
   aoa.push(['시간', ...scheduleDays.map((d) => d.label)]);
 
+  const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } }];
+  const fillByAddr = {}; // '{row}:{col}' -> fgColor rgb (한 칸에 한 명씩 넣어 사람마다 색이 안 겹치게 함)
+
   times.forEach((t) => {
     const end = addMinutesToTime(t, CLASS_DURATION_MIN);
-    const row = [`${t.slice(0, 5)}~${end}`];
-    scheduleDays.forEach((d) => {
-      const kids = children.filter((c) => c.dayTimes[d.value] === t);
-      const text = kids
-        .map((c) => {
-          const labels = c.paymentTypes?.length
-            ? c.paymentTypes.map((pt) => SCHEDULE_VOUCHER_LABELS[pt] || PAYMENT_TYPES[pt] || pt).join('/')
-            : PAYMENT_TYPES.none;
-          return `${c.name} (${labels})`;
-        })
-        .join('\n');
-      row.push(text);
-    });
-    aoa.push(row);
+    const kidsByDay = scheduleDays.map((d) => children.filter((c) => c.dayTimes[d.value] === t));
+    const maxKids = Math.max(1, ...kidsByDay.map((kids) => kids.length));
+    const startRow = aoa.length;
+
+    for (let sub = 0; sub < maxKids; sub++) {
+      const row = [sub === 0 ? `${t.slice(0, 5)}~${end}` : ''];
+      kidsByDay.forEach((kids, colIdx) => {
+        const c = kids[sub];
+        if (!c) {
+          row.push('');
+          return;
+        }
+        const labels = c.paymentTypes?.length
+          ? c.paymentTypes.map((pt) => SCHEDULE_VOUCHER_LABELS[pt] || PAYMENT_TYPES[pt] || pt).join('/')
+          : PAYMENT_TYPES.none;
+        row.push(`${c.name} (${labels})`);
+        const voucherKey = c.paymentTypes?.[0] || 'none';
+        fillByAddr[`${startRow + sub}:${colIdx + 1}`] = SCHEDULE_VOUCHER_FILL_COLORS[voucherKey] || SCHEDULE_VOUCHER_FILL_COLORS.none;
+      });
+      aoa.push(row);
+    }
+
+    if (maxKids > 1) {
+      merges.push({ s: { r: startRow, c: 0 }, e: { r: startRow + maxKids - 1, c: 0 } });
+    }
   });
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } }];
-  ws['!cols'] = [{ wch: 12 }, ...scheduleDays.map(() => ({ wch: 20 }))];
-  ws['!rows'] = aoa.map((_, i) => (i >= 2 ? { hpt: 46 } : undefined));
+  ws['!merges'] = merges;
+  ws['!cols'] = [{ wch: 12 }, ...scheduleDays.map(() => ({ wch: 16 }))];
 
   const thinBorder = { style: 'thin', color: { rgb: '000000' } };
   const border = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };
@@ -1838,11 +1861,12 @@ function exportScheduleExcel() {
       if (!ws[addr]) ws[addr] = { t: 's', v: '' };
       const isTitle = r === 0;
       const isHeader = r === 1;
+      const fillColor = isHeader ? 'F1F5F9' : fillByAddr[`${r}:${c}`];
       ws[addr].s = {
         border,
         alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
         font: { bold: isTitle || isHeader, sz: isTitle ? 13 : 11 },
-        fill: isHeader ? { fgColor: { rgb: 'F1F5F9' } } : undefined,
+        fill: fillColor ? { fgColor: { rgb: fillColor } } : undefined,
       };
     }
   }
