@@ -1989,12 +1989,15 @@ function renderMonthlyAttendance() {
   const bodyRows = rows
     .map(({ child: c, presentCount, cells, paymentStatus }) => {
       const cellsHtml = cells
-        .map((cell) => {
+        .map((cell, idx) => {
           if (cell.type === 'noclass') return '<td class="att-noclass"></td>';
           if (cell.type === 'empty') return '<td class="att-empty">-</td>';
           const makeupMark = cell.isMakeup ? '<br><span class="att-makeup-mark">(보강)</span>' : '';
           if (cell.type === 'present') return `<td class="att-present">출석${makeupMark}</td>`;
-          return `<td class="att-absent">결석${cell.reason ? `<br>${esc(cell.reason)}` : ''}${makeupMark}</td>`;
+          // 인쇄할 때 이름 밑에 사유가 길게 붙어 칸이 이상해지는 문제가 있어, 화면에는 사유를 바로 표시하지
+          // 않고 클릭하면 그 날의 결석 사유를 볼 수 있게 한다 (인쇄물에는 "결석"만 나감).
+          const hasReason = !!cell.reason;
+          return `<td class="att-absent${hasReason ? ' has-reason' : ''}" data-child="${c.id}" data-day="${dateList[idx]}" title="${hasReason ? '클릭하면 결석 사유를 볼 수 있어요' : ''}">결석${makeupMark}</td>`;
         })
         .join('');
       const badge = paymentStatus === 'unpaid'
@@ -2018,6 +2021,16 @@ function renderMonthlyAttendance() {
         <tbody>${bodyRows}${totalRow}</tbody>
       </table>
     </div>`;
+
+  wrap.querySelectorAll('.att-absent.has-reason').forEach((td) => {
+    td.addEventListener('click', () => {
+      const day = Number(td.dataset.day);
+      const child = data.children.find((c) => String(c.id) === td.dataset.child);
+      const key = dateKey(new Date(attViewYear, attViewMonth - 1, day));
+      const reason = child ? data.attendance[key]?.[child.id]?.reason : '';
+      alert(`${attViewMonth}월 ${day}일 ${child?.name || ''} 결석 사유\n${reason || '(사유 없음)'}`);
+    });
+  });
 }
 
 function renderPasswordSettings() {
