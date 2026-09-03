@@ -819,8 +819,12 @@ function printScheduleFitToPage() {
   const printMarginMm = 1;
   // 브라우저 인쇄 창이 CSS @page 방향을 자동으로 따라가지 않는 경우가 있어(실제로 세로로 인쇄됨),
   // 항상 세로로 인쇄된다고 가정하고 계산한다. (A4 세로: 210mm x 297mm)
-  const pageWpx = (210 - printMarginMm * 2) * PRINT_MM_TO_PX;
-  const pageHpxBase = (297 - printMarginMm * 2) * PRINT_MM_TO_PX;
+  // 실제 브라우저/프린터가 @page margin을 우리 계산과 완전히 똑같이 처리하지 않을 수 있어(예: 최소
+  // 여백을 강제로 더 크게 잡는 경우), 계산한 크기보다 살짝 더 작게 잡아야 그 오차만큼 빈 2페이지가
+  // 추가로 인쇄되는 사고를 막을 수 있다.
+  const PAGE_SAFETY_PX = 4;
+  const pageWpx = (210 - printMarginMm * 2) * PRINT_MM_TO_PX - PAGE_SAFETY_PX;
+  const pageHpxBase = (297 - printMarginMm * 2) * PRINT_MM_TO_PX - PAGE_SAFETY_PX;
 
   win.document.open();
   win.document.write(`<!DOCTYPE html>
@@ -831,7 +835,7 @@ function printScheduleFitToPage() {
 <style>
 ${cssText}
 @page { size: A4 portrait; margin: ${printMarginMm}mm; }
-html, body { margin: 0; padding: 0; height: 100%; }
+html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
 body { display: flex; align-items: center; justify-content: center; }
 #schedulePrintArea { position: static !important; width: auto !important; display: flex !important; flex-direction: column; align-items: center; }
 #schedulePrintTitle { display: block !important; text-align: center; margin: 0 0 .5rem; }
