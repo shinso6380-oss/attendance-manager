@@ -835,7 +835,8 @@ html, body { margin: 0; padding: 0; height: 100%; }
 body { display: flex; align-items: center; justify-content: center; }
 #schedulePrintArea { position: static !important; width: auto !important; display: flex !important; flex-direction: column; align-items: center; }
 #schedulePrintTitle { display: block !important; text-align: center; margin: 0 0 .5rem; }
-#scheduleScaleWrap { display: flex; align-items: center; justify-content: center; }
+/* overflow:hidden + 고정 크기 = 이 상자는 물리적으로 절대 페이지를 넘어갈 수 없다(브라우저 구현에 관계없이 항상 동일하게 동작하는 가장 기본적인 CSS 동작) */
+#scheduleScaleWrap { overflow: hidden; }
 /* 요일 칸 너비를 동일하게 맞추고 글씨를 키우며, 표가 인쇄 영역 세로를 최대한 채우도록 함 */
 #scheduleTableWrap .payment-table-wrap { width: 100%; height: 100%; }
 #scheduleTableWrap .schedule-table {
@@ -856,7 +857,6 @@ body { display: flex; align-items: center; justify-content: center; }
   font-size: .8rem;
   white-space: normal;
   word-break: keep-all;
-  overflow-wrap: break-word;
 }
 #scheduleTableWrap .schedule-table th:first-child,
 #scheduleTableWrap .schedule-table td:first-child {
@@ -866,11 +866,20 @@ body { display: flex; align-items: center; justify-content: center; }
 #scheduleTableWrap .schedule-table td:not(:first-child) {
   width: calc((100% - 14%) / 6);
 }
-/* 칸이 고정 너비라 이름/바우처 태그가 옆으로 넘치지 않도록 칸 안에서 줄바꿈되게 함 */
+/* 칸이 고정 너비라 이름/바우처 태그가 옆으로 넘치지 않도록 칸 안에서 줄바꿈되게 함.
+   overflow-wrap:break-word는 음절(글자) 중간에서도 강제로 끊어버릴 수 있어,
+   글자 단위는 유지하고(word-break:keep-all) 정 안 들어가면 칸이 잘라내도록(overflow:hidden, 위에서 지정) 한다. */
 #scheduleTableWrap .schedule-child,
 #scheduleTableWrap .voucher-tag {
   white-space: normal;
-  overflow-wrap: break-word;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+#scheduleTableWrap .schedule-child {
+  align-items: center;
+}
+#scheduleTableWrap .schedule-meta {
+  justify-content: center;
 }
 #scheduleTableWrap .schedule-cell-grid {
   min-width: 0;
@@ -890,22 +899,36 @@ body { display: flex; align-items: center; justify-content: center; }
   </div>
   <script>
   (function () {
+    var wrap = document.getElementById('scheduleScaleWrap');
     var content = document.getElementById('scheduleTableWrap');
     var table = document.querySelector('#scheduleTableWrap .schedule-table');
     var titleEl = document.getElementById('schedulePrintTitle');
     var pageWpx = ${pageWpx};
     var pageHpxBase = ${pageHpxBase};
-    var SAFETY_MARGIN = 0.9;
 
     function fit() {
-      content.style.zoom = '1';
+      content.style.transform = 'none';
       var titleHeight = titleEl ? (titleEl.offsetHeight + 8) : 0;
       var pageHpx = pageHpxBase - titleHeight;
-      content.style.width = pageWpx + 'px';
-      content.style.height = pageHpx + 'px';
+
+      // 1) 바깥 상자를 페이지 크기에 딱 맞춰 고정한다. overflow:hidden이라
+      //    이 크기를 절대 넘어갈 수 없다 (계산이 조금 어긋나도 페이지가 넘어가는 사고 자체가 불가능).
+      wrap.style.width = pageWpx + 'px';
+      wrap.style.height = pageHpx + 'px';
+
+      // 2) 표 자체를 그 상자에 맞춰 채운다 (내용이 적으면 행이 늘어나 빈 공간을 채움).
+      content.style.width = '100%';
+      content.style.height = '100%';
+
+      // 3) 그래도 내용이 많아 넘치면 화면에 보이는 크기만 축소한다.
+      //    (transform은 레이아웃 크기에 영향을 주지 않는 순수 시각 효과이므로,
+      //     바깥 상자가 이미 1)에서 고정+클리핑되어 있어 페이지 초과는 구조적으로 불가능하다.)
       var rect = table.getBoundingClientRect();
-      var scale = Math.min(1, (pageWpx * SAFETY_MARGIN) / rect.width, (pageHpx * SAFETY_MARGIN) / rect.height);
-      if (scale < 1) content.style.zoom = String(scale);
+      var scale = Math.min(1, pageWpx / rect.width, pageHpx / rect.height);
+      if (scale < 1) {
+        content.style.transformOrigin = 'top left';
+        content.style.transform = 'scale(' + scale + ')';
+      }
     }
 
     var done = false;
@@ -1791,7 +1814,7 @@ function renderSchedule() {
 // 브라우저 인쇄 대신 엑셀로 내려받아 엑셀 자체의 "한 페이지에 맞춤" 인쇄 기능을 쓸 수 있게 한다.
 // 시간표 화면의 바우처 태그 배경색과 맞춘 엑셀 채우기 색
 const SCHEDULE_VOUCHER_FILL_COLORS = {
-  developmental: '9CA3AF',
+  developmental: 'D1D5DB',
   'edu-therapy': 'FDBA74',
   'edu-afterschool': 'FBCFE8',
   sports: '7DD3FC',
