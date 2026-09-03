@@ -843,7 +843,7 @@ body { display: flex; align-items: center; justify-content: center; }
   table-layout: fixed;
   width: 100%;
   height: 100%;
-  font-size: .95rem;
+  font-size: .8rem;
 }
 #scheduleTableWrap .schedule-table th,
 #scheduleTableWrap .schedule-table td {
@@ -851,10 +851,10 @@ body { display: flex; align-items: center; justify-content: center; }
   overflow: hidden;
 }
 #scheduleTableWrap .schedule-table thead th {
-  font-size: .9rem;
+  font-size: .76rem;
 }
 #scheduleTableWrap .schedule-table tbody th {
-  font-size: .8rem;
+  font-size: .68rem;
   white-space: normal;
   word-break: keep-all;
 }
@@ -880,6 +880,7 @@ body { display: flex; align-items: center; justify-content: center; }
 }
 #scheduleTableWrap .schedule-meta {
   justify-content: center;
+  font-size: .6rem;
 }
 #scheduleTableWrap .schedule-cell-grid {
   min-width: 0;
