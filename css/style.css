@@ -717,8 +717,11 @@ body {
 }
 
 .fee-input-row input[type="number"] { width: 80px; }
-.fee-input-row input.additional-amount,
-.fee-input-row input.copay-amount { width: 110px; }
+.fee-input-row input.money-input {
+  width: 120px;
+  text-align: right;
+  font-weight: 600;
+}
 .fee-input-row textarea {
   flex: 1;
   min-width: 200px;
