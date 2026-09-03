@@ -478,7 +478,7 @@ async function loadAllData() {
   data.attendance = {};
   (attendanceRes.data || []).forEach((row) => {
     if (!data.attendance[row.date]) data.attendance[row.date] = {};
-    data.attendance[row.date][row.child_id] = { status: row.status, reason: row.reason || '' };
+    data.attendance[row.date][row.child_id] = { status: row.status, reason: row.reason || '', makeupTime: row.makeup_time || '' };
   });
 
   data.monthlyFees = {};
@@ -1417,15 +1417,23 @@ function renderAttendance() {
   }
   empty.classList.add('hidden');
 
+  const makeupTimeOptions = generateTimeOptions(10);
+
   list.innerHTML = todayChildren
     .map((c) => {
-      const record = data.attendance[key][c.id] || { status: '', reason: '' };
+      const record = data.attendance[key][c.id] || { status: '', reason: '', makeupTime: '' };
       const isAbsent = record.status === 'absent';
       const isMakeup = !scheduledIds.has(c.id);
+      const timeDisplay = isMakeup
+        ? `<select class="makeup-time-select">
+            <option value="">시간 선택</option>
+            ${makeupTimeOptions.map((t) => `<option value="${t}" ${t === record.makeupTime ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>`
+        : esc((c.dayTimes?.[todayDow] || '').slice(0, 5));
       return `
       <div class="card" data-child="${c.id}">
         <div class="child-name">${esc(c.name)}${isMakeup ? ' <span class="badge makeup-badge">보강</span>' : ''}</div>
-        <div class="child-meta">${(c.dayTimes?.[todayDow] || '').slice(0, 5)} · ${esc(c.teacher)} · ${SUBJECTS[c.subject]?.label}</div>
+        <div class="child-meta">${timeDisplay} · ${esc(c.teacher)} · ${SUBJECTS[c.subject]?.label}</div>
         <div class="attendance-row" style="margin-top:.75rem">
           <div class="status-btns">
             <button class="status-btn ${record.status === 'present' ? 'active-present' : ''}" data-status="present">출석</button>
@@ -1456,24 +1464,47 @@ function renderAttendance() {
         const status = btn.dataset.status;
         const reason = status === 'absent' ? (data.attendance[key][cid]?.reason || '') : '';
 
+        const makeupTime = data.attendance[key][cid]?.makeupTime || '';
         const { error } = await supabaseClient
           .from('attendance')
-          .upsert({ child_id: cid, date: key, status, reason }, { onConflict: 'child_id,date' });
+          .upsert({ child_id: cid, date: key, status, reason, makeup_time: makeupTime || null }, { onConflict: 'child_id,date' });
         if (error) {
           console.error(error);
           alert('출석 저장 중 오류가 발생했습니다.');
           return;
         }
 
-        data.attendance[key][cid] = { status, reason };
+        data.attendance[key][cid] = { status, reason, makeupTime };
         renderAttendance();
       });
     });
     const reasonInput = card.querySelector('.absence-reason');
     reasonInput?.addEventListener('input', () => {
-      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: 'absent', reason: '' };
+      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: 'absent', reason: '', makeupTime: '' };
       data.attendance[key][cid].reason = reasonInput.value;
       saveReasonDebounced(cid, reasonInput.value);
+    });
+
+    card.querySelector('.makeup-time-select')?.addEventListener('change', async (e) => {
+      const time = e.target.value;
+      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: '', reason: '', makeupTime: '' };
+      data.attendance[key][cid].makeupTime = time;
+      const { error } = await supabaseClient
+        .from('attendance')
+        .upsert(
+          {
+            child_id: cid,
+            date: key,
+            status: data.attendance[key][cid].status || '',
+            reason: data.attendance[key][cid].reason || '',
+            makeup_time: time || null,
+          },
+          { onConflict: 'child_id,date' }
+        );
+      if (error) {
+        console.error(error);
+        alert('보강 시간 저장 중 오류가 발생했습니다.');
+      }
     });
 
     card.querySelector('.remove-makeup')?.addEventListener('click', async () => {
