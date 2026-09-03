@@ -426,6 +426,7 @@ let extraChildIdsByDate = {};
 let childrenSortMode = 'recent';
 let attendanceViewDate = new Date();
 let feesExcludedIds = new Set();
+let pendingPrintFit = null;
 
 const loadingScreen = document.getElementById('loadingScreen');
 const loginScreen = document.getElementById('loginScreen');
@@ -665,7 +666,19 @@ function bindEvents() {
   document.getElementById('btnPrintSchedule').addEventListener('click', () => {
     document.getElementById('schedulePrintTitle').textContent = `${currentUser?.name || ''} 시간표 (월~토)`;
     setPrintPageSize('portrait');
+    pendingPrintFit = 'schedule';
     window.print();
+  });
+  window.addEventListener('beforeprint', () => {
+    if (pendingPrintFit === 'schedule') {
+      fitElementToPage('scheduleTableWrap', 'scheduleScaleWrap', 'portrait', document.getElementById('schedulePrintTitle'));
+    }
+  });
+  window.addEventListener('afterprint', () => {
+    if (pendingPrintFit === 'schedule') {
+      resetPrintScale('scheduleTableWrap', 'scheduleScaleWrap');
+    }
+    pendingPrintFit = null;
   });
 
   document.getElementById('closeHistoryModal').addEventListener('click', closeChildHistoryModal);
@@ -754,6 +767,51 @@ function setPrintPageSize(orientation) {
     document.head.appendChild(styleEl);
   }
   styleEl.textContent = `@page { size: A4 ${orientation}; margin: 10mm; }`;
+}
+
+const PRINT_MM_TO_PX = 96 / 25.4;
+const PRINT_MARGIN_MM = 10;
+const PRINT_PAGE_SIZES_MM = { portrait: { w: 210, h: 297 }, landscape: { w: 297, h: 210 } };
+
+// 인쇄 시 내용이 A4 한 장 안에 다 들어가도록 자동으로 축소한다 (인쇄 렌더링이 반영된 뒤에 호출해야 함).
+function fitElementToPage(contentId, wrapId, orientation, titleEl) {
+  const content = document.getElementById(contentId);
+  const wrap = document.getElementById(wrapId);
+  if (!content || !wrap) return;
+
+  content.style.transform = 'none';
+  wrap.style.width = '';
+  wrap.style.height = '';
+  wrap.style.overflow = '';
+
+  const naturalWidth = content.scrollWidth;
+  const naturalHeight = content.scrollHeight;
+  const titleHeight = titleEl
+    ? titleEl.offsetHeight + parseFloat(getComputedStyle(titleEl).marginBottom || '0')
+    : 0;
+
+  const { w: pageWmm, h: pageHmm } = PRINT_PAGE_SIZES_MM[orientation];
+  const pageWpx = (pageWmm - PRINT_MARGIN_MM * 2) * PRINT_MM_TO_PX;
+  const pageHpx = (pageHmm - PRINT_MARGIN_MM * 2) * PRINT_MM_TO_PX - titleHeight;
+
+  const scale = Math.min(1, pageWpx / naturalWidth, pageHpx / naturalHeight);
+
+  content.style.transformOrigin = 'top left';
+  content.style.transform = `scale(${scale})`;
+  wrap.style.width = `${naturalWidth * scale}px`;
+  wrap.style.height = `${naturalHeight * scale}px`;
+  wrap.style.overflow = 'hidden';
+}
+
+function resetPrintScale(contentId, wrapId) {
+  const content = document.getElementById(contentId);
+  const wrap = document.getElementById(wrapId);
+  if (content) content.style.transform = '';
+  if (wrap) {
+    wrap.style.width = '';
+    wrap.style.height = '';
+    wrap.style.overflow = '';
+  }
 }
 
 function getAttendanceReportTitle() {
