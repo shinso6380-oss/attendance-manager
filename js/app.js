@@ -818,7 +818,7 @@ function printScheduleFitToPage() {
 <title>${esc(title)}</title>
 <style>
 ${cssText}
-@page { size: A4 landscape; margin: ${printMarginMm}mm; }
+@page { size: A4 portrait; margin: ${printMarginMm}mm; }
 html, body { margin: 0; padding: 0; height: 100%; }
 body { display: flex; align-items: center; justify-content: center; }
 #schedulePrintArea { position: static !important; width: auto !important; display: flex !important; flex-direction: column; align-items: center; }
@@ -904,9 +904,10 @@ function fitElementToPageInWindow(win, marginMm) {
 
   content.style.zoom = '1';
   const titleHeight = titleEl ? titleEl.offsetHeight + 8 : 0;
-  // A4 가로 방향(297mm x 210mm)
-  const pageWpx = (297 - marginMm * 2) * PRINT_MM_TO_PX;
-  const pageHpx = (210 - marginMm * 2) * PRINT_MM_TO_PX - titleHeight;
+  // 브라우저 인쇄 창이 CSS @page 방향을 자동으로 따라가지 않는 경우가 있어(실제로 세로로 인쇄됨),
+  // 항상 세로로 인쇄된다고 가정하고 계산한다. (A4 세로: 210mm x 297mm)
+  const pageWpx = (210 - marginMm * 2) * PRINT_MM_TO_PX;
+  const pageHpx = (297 - marginMm * 2) * PRINT_MM_TO_PX - titleHeight;
 
   content.style.width = `${pageWpx}px`;
   content.style.height = `${pageHpx}px`;
@@ -1796,8 +1797,24 @@ function getPaymentStatus(child, year, month) {
   return additionalOk && copayOk ? 'paid' : 'unpaid';
 }
 
+// 월 출석부에 표시할 순서: 출석 요일이 이른 순(월→토)으로, 같은 요일이면 시간 순으로 정렬
+function sortChildrenByAttendanceDay(children) {
+  const dayOrder = (d) => (d === 0 ? 7 : d); // 일요일은 쓰지 않지만 혹시 있으면 맨 뒤로
+  return [...children].sort((a, b) => {
+    const aDays = a.days?.length ? [...a.days].sort((x, y) => dayOrder(x) - dayOrder(y)) : [];
+    const bDays = b.days?.length ? [...b.days].sort((x, y) => dayOrder(x) - dayOrder(y)) : [];
+    const aDay = aDays.length ? dayOrder(aDays[0]) : 99;
+    const bDay = bDays.length ? dayOrder(bDays[0]) : 99;
+    if (aDay !== bDay) return aDay - bDay;
+    const aTime = (aDays.length && a.dayTimes?.[aDays[0]]) || '';
+    const bTime = (bDays.length && b.dayTimes?.[bDays[0]]) || '';
+    if (aTime !== bTime) return aTime.localeCompare(bTime);
+    return a.name.localeCompare(b.name, 'ko');
+  });
+}
+
 function computeMonthlyAttendanceData(year, month) {
-  const children = getVisibleChildren();
+  const children = sortChildrenByAttendanceDay(getVisibleChildren());
   const lastDay = new Date(year, month, 0).getDate();
   const dateList = Array.from({ length: lastDay }, (_, i) => i + 1);
 
