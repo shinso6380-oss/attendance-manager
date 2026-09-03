@@ -483,6 +483,11 @@ body {
   background: #7dd3fc;
 }
 
+.voucher-tag-developmental {
+  color: #000;
+  background: #9ca3af;
+}
+
 .monthly-attendance-table th,
 .monthly-attendance-table td {
   padding: .35rem .3rem;
