@@ -949,13 +949,4 @@ fieldset {
   .monthly-attendance-table .att-name {
     position: static;
   }
-
-  .schedule-table {
-    font-size: 9pt;
-  }
-
-  .schedule-child,
-  .voucher-tag {
-    white-space: normal;
-  }
 }

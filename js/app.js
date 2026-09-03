@@ -426,7 +426,6 @@ let extraChildIdsByDate = {};
 let childrenSortMode = 'recent';
 let attendanceViewDate = new Date();
 let feesExcludedIds = new Set();
-let pendingPrintFit = null;
 
 const loadingScreen = document.getElementById('loadingScreen');
 const loginScreen = document.getElementById('loginScreen');
@@ -534,11 +533,23 @@ function populateFormSelects() {
   data.teachers.forEach((t) => {
     teacherSel.innerHTML += `<option value="${esc(t.name)}">${esc(t.name)}</option>`;
   });
+}
+
+// 신승오 선생님은 심리운동, 그 외 선생님은 언어재활만 담당하므로 과목 목록을 담당 선생님에 따라 다르게 보여준다.
+function getSubjectsForTeacher(teacherName) {
+  return teacherName === '신승오'
+    ? { psychomotor: SUBJECTS.psychomotor }
+    : { language: SUBJECTS.language };
+}
+
+function populateSubjectSelect(teacherName) {
   const subjectSel = childForm.querySelector('[name="subject"]');
-  subjectSel.innerHTML = '<option value="">선택</option>';
-  Object.entries(SUBJECTS).forEach(([k, v]) => {
-    subjectSel.innerHTML += `<option value="${k}">${v.label}</option>`;
-  });
+  const current = subjectSel.value;
+  const options = getSubjectsForTeacher(teacherName);
+  subjectSel.innerHTML =
+    '<option value="">선택</option>' +
+    Object.entries(options).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('');
+  if (options[current]) subjectSel.value = current;
 }
 
 function renderDayTimeRows(container = document.getElementById('dayTimeRows'), dayTimes = {}) {
@@ -598,6 +609,9 @@ function bindEvents() {
   });
 
   document.getElementById('btnNewChild').addEventListener('click', () => openChildModal());
+  document.getElementById('teacherSelect').addEventListener('change', (e) => {
+    populateSubjectSelect(e.target.value);
+  });
   document.getElementById('childrenSortSelect').addEventListener('change', (e) => {
     childrenSortMode = e.target.value;
     renderChildren();
@@ -663,23 +677,7 @@ function bindEvents() {
   });
   document.getElementById('btnExportAttendanceExcel').addEventListener('click', exportMonthlyAttendanceExcel);
 
-  document.getElementById('btnPrintSchedule').addEventListener('click', () => {
-    document.getElementById('schedulePrintTitle').textContent = `${currentUser?.name || ''} 시간표 (월~토)`;
-    setPrintPageSize('portrait');
-    pendingPrintFit = 'schedule';
-    window.print();
-  });
-  window.addEventListener('beforeprint', () => {
-    if (pendingPrintFit === 'schedule') {
-      fitElementToPage('scheduleTableWrap', 'scheduleScaleWrap', 'portrait', document.getElementById('schedulePrintTitle'));
-    }
-  });
-  window.addEventListener('afterprint', () => {
-    if (pendingPrintFit === 'schedule') {
-      resetPrintScale('scheduleTableWrap', 'scheduleScaleWrap');
-    }
-    pendingPrintFit = null;
-  });
+  document.getElementById('btnPrintSchedule').addEventListener('click', printScheduleFitToPage);
 
   document.getElementById('closeHistoryModal').addEventListener('click', closeChildHistoryModal);
   document.getElementById('closeHistoryModalFooter').addEventListener('click', closeChildHistoryModal);
@@ -771,47 +769,77 @@ function setPrintPageSize(orientation) {
 
 const PRINT_MM_TO_PX = 96 / 25.4;
 const PRINT_MARGIN_MM = 10;
-const PRINT_PAGE_SIZES_MM = { portrait: { w: 210, h: 297 }, landscape: { w: 297, h: 210 } };
 
-// 인쇄 시 내용이 A4 한 장 안에 다 들어가도록 자동으로 축소한다 (인쇄 렌더링이 반영된 뒤에 호출해야 함).
-function fitElementToPage(contentId, wrapId, orientation, titleEl) {
-  const content = document.getElementById(contentId);
-  const wrap = document.getElementById(wrapId);
-  if (!content || !wrap) return;
+// 시간표는 인쇄할 때 메인 화면의 다른 탭/헤더와 얽히지 않도록 별도의 인쇄 전용 창을 띄워
+// 그 창 안에서만 A4 세로 1장에 맞춰 축소 + 가운데 정렬한 뒤 인쇄한다.
+function printScheduleFitToPage() {
+  const tableWrap = document.getElementById('scheduleTableWrap');
+  if (!tableWrap) return;
+  const title = `${currentUser?.name || ''} 시간표 (월~토)`;
+  const cssHref = new URL('css/style.css', document.baseURI).href;
 
-  content.style.transform = 'none';
-  wrap.style.width = '';
-  wrap.style.height = '';
-  wrap.style.overflow = '';
+  const win = window.open('', '_blank');
+  if (!win) {
+    alert('인쇄 창을 열 수 없습니다. 팝업 차단을 해제한 뒤 다시 시도해주세요.');
+    return;
+  }
 
-  const naturalWidth = content.scrollWidth;
-  const naturalHeight = content.scrollHeight;
-  const titleHeight = titleEl
-    ? titleEl.offsetHeight + parseFloat(getComputedStyle(titleEl).marginBottom || '0')
-    : 0;
+  const printMarginMm = 5;
+  win.document.open();
+  win.document.write(`<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>${esc(title)}</title>
+<link rel="stylesheet" href="${cssHref}">
+<style>
+  @page { size: A4 portrait; margin: ${printMarginMm}mm; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body { display: flex; align-items: center; justify-content: center; }
+  #schedulePrintArea { position: static !important; width: auto !important; display: flex !important; flex-direction: column; align-items: center; }
+  #schedulePrintTitle { display: block !important; text-align: center; margin: 0 0 .5rem; }
+  #scheduleScaleWrap { display: flex; align-items: center; justify-content: center; }
+</style>
+</head>
+<body>
+  <div id="schedulePrintArea">
+    <h3 id="schedulePrintTitle">${esc(title)}</h3>
+    <div id="scheduleScaleWrap"><div id="scheduleTableWrap">${tableWrap.innerHTML}</div></div>
+  </div>
+</body>
+</html>`);
+  win.document.close();
 
-  const { w: pageWmm, h: pageHmm } = PRINT_PAGE_SIZES_MM[orientation];
-  const pageWpx = (pageWmm - PRINT_MARGIN_MM * 2) * PRINT_MM_TO_PX;
-  const pageHpx = (pageHmm - PRINT_MARGIN_MM * 2) * PRINT_MM_TO_PX - titleHeight;
-
-  const scale = Math.min(1, pageWpx / naturalWidth, pageHpx / naturalHeight);
-
-  content.style.transformOrigin = 'top left';
-  content.style.transform = `scale(${scale})`;
-  wrap.style.width = `${naturalWidth * scale}px`;
-  wrap.style.height = `${naturalHeight * scale}px`;
-  wrap.style.overflow = 'hidden';
+  win.addEventListener('load', () => {
+    setTimeout(() => {
+      fitElementToPageInWindow(win, printMarginMm);
+      win.focus();
+      win.print();
+    }, 150);
+  });
+  win.addEventListener('afterprint', () => win.close());
 }
 
-function resetPrintScale(contentId, wrapId) {
-  const content = document.getElementById(contentId);
-  const wrap = document.getElementById(wrapId);
-  if (content) content.style.transform = '';
-  if (wrap) {
-    wrap.style.width = '';
-    wrap.style.height = '';
-    wrap.style.overflow = '';
-  }
+// 팝업 창 안의 표를 실측하여 A4 한 장에 들어가도록 축소 비율을 계산해 적용한다.
+function fitElementToPageInWindow(win, marginMm) {
+  const doc = win.document;
+  const content = doc.getElementById('scheduleTableWrap');
+  const titleEl = doc.getElementById('schedulePrintTitle');
+  if (!content) return;
+
+  content.style.zoom = '1';
+  const naturalWidth = content.scrollWidth;
+  const naturalHeight = content.scrollHeight;
+  const titleHeight = titleEl ? titleEl.offsetHeight + 8 : 0;
+
+  const pageWpx = (210 - marginMm * 2) * PRINT_MM_TO_PX;
+  const pageHpx = (297 - marginMm * 2) * PRINT_MM_TO_PX - titleHeight;
+
+  // transform: scale()는 화면에 보이는 크기만 줄이고 실제 레이아웃 크기는 그대로라
+  // 인쇄 시 페이지가 나뉘거나 정렬이 어긋난다. zoom은 레이아웃 자체를 줄여주므로
+  // 항상 실제로 A4 한 장 안에 들어가고 가운데 정렬도 정확히 맞는다.
+  const scale = Math.min(1, pageWpx / naturalWidth, pageHpx / naturalHeight);
+  content.style.zoom = String(scale);
 }
 
 function getAttendanceReportTitle() {
@@ -1010,18 +1038,22 @@ function openChildModal(child = null) {
     childForm.querySelector('[name="name"]').value = child.name;
     childForm.querySelector('[name="birthDate"]').value = child.birthDate || '';
     teacherSel.value = child.teacher;
+    populateSubjectSelect(child.teacher);
     childForm.querySelector('[name="subject"]').value = child.subject;
     renderPaymentTypeCheckboxes(document.getElementById('paymentTypeCheckboxes'), child.paymentTypes || []);
     renderDayTimeRows(document.getElementById('dayTimeRows'), child.dayTimes || {});
-  } else {
-    renderPaymentTypeCheckboxes(document.getElementById('paymentTypeCheckboxes'), []);
-    renderDayTimeRows(document.getElementById('dayTimeRows'), {});
     if (!isAdmin()) {
       teacherSel.value = currentUser.name;
     }
+    teacherSel.disabled = !isAdmin();
+  } else {
+    renderPaymentTypeCheckboxes(document.getElementById('paymentTypeCheckboxes'), []);
+    renderDayTimeRows(document.getElementById('dayTimeRows'), {});
+    // 새 대상자 등록 시 담당 선생님은 항상 로그인한 본인으로 고정한다.
+    teacherSel.value = currentUser.name;
+    populateSubjectSelect(currentUser.name);
+    teacherSel.disabled = true;
   }
-
-  teacherSel.disabled = !isAdmin();
 
   updateVoucherSubFields();
   if (child?.developmentalSub) {
@@ -1070,8 +1102,8 @@ async function handleChildSubmit(e) {
     return;
   }
 
-  let teacher = fd.get('teacher');
-  if (!isAdmin()) teacher = currentUser.name;
+  // teacherSelect가 잠겨 있으면(신규 등록 전체 / 비관리자 수정) FormData에 값이 실리지 않으므로 본인으로 대체한다.
+  let teacher = fd.get('teacher') || currentUser.name;
 
   const child = {
     name: fd.get('name').trim(),
