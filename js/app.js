@@ -1419,30 +1419,56 @@ function renderAttendance() {
 
   const makeupTimeOptions = generateTimeOptions(10);
 
-  list.innerHTML = todayChildren
-    .map((c) => {
-      const record = data.attendance[key][c.id] || { status: '', reason: '', makeupTime: '' };
-      const isAbsent = record.status === 'absent';
-      const isMakeup = !scheduledIds.has(c.id);
-      const timeDisplay = isMakeup
-        ? `<select class="makeup-time-select">
-            <option value="">시간 선택</option>
-            ${makeupTimeOptions.map((t) => `<option value="${t}" ${t === record.makeupTime ? 'selected' : ''}>${t}</option>`).join('')}
-          </select>`
-        : esc((c.dayTimes?.[todayDow] || '').slice(0, 5));
+  // 시간대별로 묶어서 보여준다. 정규 시간이 없는(아직 시간 미지정) 보강 인원은 맨 뒤 "시간 미정" 묶음으로.
+  const groups = new Map(); // time(''=미정) -> children[]
+  todayChildren.forEach((c) => {
+    const isMakeup = !scheduledIds.has(c.id);
+    const record = data.attendance[key][c.id] || { status: '', reason: '', makeupTime: '' };
+    const time = isMakeup ? (record.makeupTime || '') : (c.dayTimes?.[todayDow] || '');
+    if (!groups.has(time)) groups.set(time, []);
+    groups.get(time).push(c);
+  });
+  const sortedTimes = [...groups.keys()].sort((a, b) => {
+    if (!a) return 1;
+    if (!b) return -1;
+    return a.localeCompare(b);
+  });
+
+  list.innerHTML = sortedTimes
+    .map((time) => {
+      const groupLabel = time ? time.slice(0, 5) : '시간 미정';
+      const cardsHtml = groups
+        .get(time)
+        .map((c) => {
+          const record = data.attendance[key][c.id] || { status: '', reason: '', makeupTime: '' };
+          const isAbsent = record.status === 'absent';
+          const isMakeup = !scheduledIds.has(c.id);
+          const timeDisplay = isMakeup
+            ? `<select class="makeup-time-select">
+                <option value="">시간 선택</option>
+                ${makeupTimeOptions.map((t) => `<option value="${t}" ${t === record.makeupTime ? 'selected' : ''}>${t}</option>`).join('')}
+              </select>`
+            : esc((c.dayTimes?.[todayDow] || '').slice(0, 5));
+          return `
+          <div class="card" data-child="${c.id}">
+            <div class="child-name">${esc(c.name)}${isMakeup ? ' <span class="badge makeup-badge">보강</span>' : ''}</div>
+            <div class="child-meta">${timeDisplay} · ${esc(c.teacher)} · ${SUBJECTS[c.subject]?.label}</div>
+            <div class="attendance-row" style="margin-top:.75rem">
+              <div class="status-btns">
+                <button class="status-btn ${record.status === 'present' ? 'active-present' : ''}" data-status="present">출석</button>
+                <button class="status-btn ${record.status === 'absent' ? 'active-absent' : ''}" data-status="absent">결석</button>
+              </div>
+              <input class="absence-reason" placeholder="결석 사유" value="${esc(record.reason)}"
+                ${isAbsent ? '' : 'disabled'}>
+              ${isMakeup ? '<button type="button" class="btn btn-sm btn-danger remove-makeup">제외</button>' : ''}
+            </div>
+          </div>`;
+        })
+        .join('');
       return `
-      <div class="card" data-child="${c.id}">
-        <div class="child-name">${esc(c.name)}${isMakeup ? ' <span class="badge makeup-badge">보강</span>' : ''}</div>
-        <div class="child-meta">${timeDisplay} · ${esc(c.teacher)} · ${SUBJECTS[c.subject]?.label}</div>
-        <div class="attendance-row" style="margin-top:.75rem">
-          <div class="status-btns">
-            <button class="status-btn ${record.status === 'present' ? 'active-present' : ''}" data-status="present">출석</button>
-            <button class="status-btn ${record.status === 'absent' ? 'active-absent' : ''}" data-status="absent">결석</button>
-          </div>
-          <input class="absence-reason" placeholder="결석 사유" value="${esc(record.reason)}"
-            ${isAbsent ? '' : 'disabled'}>
-          ${isMakeup ? '<button type="button" class="btn btn-sm btn-danger remove-makeup">제외</button>' : ''}
-        </div>
+      <div class="attendance-time-group">
+        <div class="attendance-time-group-label">${esc(groupLabel)}</div>
+        <div class="attendance-time-group-cards">${cardsHtml}</div>
       </div>`;
     })
     .join('');
