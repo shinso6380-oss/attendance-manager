@@ -1895,7 +1895,7 @@ function renderFees() {
 function renderSchedule() {
   document.getElementById('scheduleTitle').textContent = `${currentUser?.name || ''} 시간표 (월~토)`;
   const wrap = document.getElementById('scheduleTableWrap');
-  const children = getVisibleChildren().filter((c) => c.dayTimes && Object.keys(c.dayTimes).length);
+  const children = getOwnChildren().filter((c) => c.dayTimes && Object.keys(c.dayTimes).length);
   const scheduleDays = DAYS.slice(1); // 월~토 (일요일 제외)
 
   if (!children.length) {
@@ -1954,7 +1954,7 @@ const SCHEDULE_VOUCHER_FILL_COLORS = {
 };
 
 function exportScheduleExcel() {
-  const children = getVisibleChildren().filter((c) => c.dayTimes && Object.keys(c.dayTimes).length);
+  const children = getOwnChildren().filter((c) => c.dayTimes && Object.keys(c.dayTimes).length);
   const scheduleDays = DAYS.slice(1); // 월~토
   if (!children.length) {
     alert('등록된 수업 시간이 없습니다.');
