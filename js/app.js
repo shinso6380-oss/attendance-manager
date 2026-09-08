@@ -433,6 +433,7 @@ let historyChildId = null;
 let historyYear = new Date().getFullYear();
 let extraChildIdsByDate = {};
 let childrenSortMode = 'recent';
+let openTeacherGroups = new Set(); // 대상자 관리에서 펼쳐놓은 선생님 구역(기본은 다 접힘)
 let attendanceViewDate = new Date();
 let feesIncludedIds = new Set(); // 기본값: 아무도 선택 안 됨 (필요한 친구만 직접 선택)
 
@@ -1362,18 +1363,25 @@ function renderChildren() {
   }
 
   if (isAdmin()) {
-    // 관리자는 선생님별로 묶어서 보여준다.
+    // 관리자는 선생님별로 묶어서 보여준다 (기본은 접힌 상태, 클릭하면 펼침).
     const teacherNames = [...new Set(visible.map((c) => c.teacher))].sort((a, b) => a.localeCompare(b, 'ko'));
     list.innerHTML = teacherNames
       .map((teacherName) => {
         const kids = sortChildren(visible.filter((c) => c.teacher === teacherName));
+        const isOpen = openTeacherGroups.has(teacherName);
         return `
-        <div class="children-teacher-group">
-          <div class="children-teacher-group-label">${esc(teacherName)} <span class="children-teacher-count">(${kids.length}명)</span></div>
+        <details class="children-teacher-group" data-teacher-group="${esc(teacherName)}" ${isOpen ? 'open' : ''}>
+          <summary class="children-teacher-group-label">${esc(teacherName)} <span class="children-teacher-count">(${kids.length}명)</span></summary>
           <div class="children-teacher-group-cards">${kids.map(renderChildCard).join('')}</div>
-        </div>`;
+        </details>`;
       })
       .join('');
+    list.querySelectorAll('[data-teacher-group]').forEach((el) => {
+      el.addEventListener('toggle', () => {
+        if (el.open) openTeacherGroups.add(el.dataset.teacherGroup);
+        else openTeacherGroups.delete(el.dataset.teacherGroup);
+      });
+    });
   } else {
     list.innerHTML = sortChildren(visible).map(renderChildCard).join('');
   }
