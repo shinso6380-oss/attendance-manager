@@ -183,6 +183,12 @@ function getVisibleChildren() {
   return data.children.filter((c) => c.teacher === currentUser.name);
 }
 
+// 관리자여도 본인 담당 대상자만 보여줘야 하는 화면(오늘 출석, 월 수업료 산정, 월 출석부)에서 사용
+function getOwnChildren() {
+  if (!currentUser) return [];
+  return data.children.filter((c) => c.teacher === currentUser.name);
+}
+
 function formatCurrency(n) {
   return Number(n).toLocaleString('ko-KR') + '원';
 }
@@ -1314,48 +1320,63 @@ function sortChildren(children) {
   return sorted;
 }
 
+function renderChildCard(c) {
+  const paymentLabel = c.paymentTypes?.length
+    ? c.paymentTypes.map((t) => PAYMENT_TYPES[t] || t).join(' + ')
+    : PAYMENT_TYPES.none;
+  const subLabels = [];
+  if (c.paymentTypes?.includes('developmental') && c.developmentalSub) {
+    subLabels.push(DEVELOPMENTAL_SUBTYPES[c.developmentalSub]?.label);
+  }
+  if (c.paymentTypes?.includes('infant') && c.infantSub) {
+    subLabels.push(INFANT_SUBTYPES[c.infantSub]?.label);
+  }
+  const voucherLabel = subLabels.length ? ` · ${subLabels.join(', ')}` : '';
+  return `
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="child-name child-name-link" data-history="${c.id}">${esc(c.name)}</div>
+        <div class="child-meta">
+          ${c.birthDate ? `${esc(c.birthDate)} (${getAgeString(c.birthDate)}) · ` : ''}
+          ${getDayTimeLabel(c)} ·
+          ${esc(c.teacher)} · ${SUBJECTS[c.subject]?.label}
+        </div>
+        <div class="child-meta">${paymentLabel}${voucherLabel}</div>
+      </div>
+      <div class="card-actions">
+        <button class="btn btn-sm" data-edit="${c.id}">수정</button>
+        <button class="btn btn-sm btn-danger" data-delete="${c.id}">삭제</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderChildren() {
   const list = document.getElementById('childrenList');
-  const children = sortChildren(getVisibleChildren());
+  const visible = getVisibleChildren();
 
-  if (!children.length) {
+  if (!visible.length) {
     list.innerHTML = '<p class="empty-msg">등록된 대상자가 없습니다. 새 대상자를 등록해 주세요.</p>';
     return;
   }
 
-  list.innerHTML = children
-    .map((c) => {
-      const paymentLabel = c.paymentTypes?.length
-        ? c.paymentTypes.map((t) => PAYMENT_TYPES[t] || t).join(' + ')
-        : PAYMENT_TYPES.none;
-      const subLabels = [];
-      if (c.paymentTypes?.includes('developmental') && c.developmentalSub) {
-        subLabels.push(DEVELOPMENTAL_SUBTYPES[c.developmentalSub]?.label);
-      }
-      if (c.paymentTypes?.includes('infant') && c.infantSub) {
-        subLabels.push(INFANT_SUBTYPES[c.infantSub]?.label);
-      }
-      const voucherLabel = subLabels.length ? ` · ${subLabels.join(', ')}` : '';
-      return `
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <div class="child-name child-name-link" data-history="${c.id}">${esc(c.name)}</div>
-            <div class="child-meta">
-              ${c.birthDate ? `${esc(c.birthDate)} (${getAgeString(c.birthDate)}) · ` : ''}
-              ${getDayTimeLabel(c)} ·
-              ${esc(c.teacher)} · ${SUBJECTS[c.subject]?.label}
-            </div>
-            <div class="child-meta">${paymentLabel}${voucherLabel}</div>
-          </div>
-          <div class="card-actions">
-            <button class="btn btn-sm" data-edit="${c.id}">수정</button>
-            <button class="btn btn-sm btn-danger" data-delete="${c.id}">삭제</button>
-          </div>
-        </div>
-      </div>`;
-    })
-    .join('');
+  if (isAdmin()) {
+    // 관리자는 선생님별로 묶어서 보여준다.
+    const teacherNames = [...new Set(visible.map((c) => c.teacher))].sort((a, b) => a.localeCompare(b, 'ko'));
+    list.innerHTML = teacherNames
+      .map((teacherName) => {
+        const kids = sortChildren(visible.filter((c) => c.teacher === teacherName));
+        return `
+        <div class="children-teacher-group">
+          <div class="children-teacher-group-label">${esc(teacherName)} <span class="children-teacher-count">(${kids.length}명)</span></div>
+          <div class="children-teacher-group-cards">${kids.map(renderChildCard).join('')}</div>
+        </div>`;
+      })
+      .join('');
+  } else {
+    list.innerHTML = sortChildren(visible).map(renderChildCard).join('');
+  }
 
   list.querySelectorAll('[data-edit]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -1384,7 +1405,7 @@ function renderAttendance() {
   const extraIds = extraChildIdsByDate[key];
 
   // 오늘 출석은 관리자여도 본인 담당 대상자만 보이게 한다 (다른 화면의 "관리자는 전체 보기"와는 별개).
-  const visible = data.children.filter((c) => c.teacher === currentUser.name);
+  const visible = getOwnChildren();
   const scheduled = visible
     .filter((c) => c.days.includes(todayDow))
     .sort((a, b) => (a.dayTimes?.[todayDow] || '').localeCompare(b.dayTimes?.[todayDow] || ''));
@@ -1644,7 +1665,7 @@ function renderFees() {
   document.getElementById('feeMonthLabel').textContent = `${feeViewYear}년 ${feeViewMonth}월`;
   const list = document.getElementById('feesList');
   const checkboxWrap = document.getElementById('feesChildCheckboxes');
-  const allChildren = getVisibleChildren();
+  const allChildren = getOwnChildren();
 
   if (!allChildren.length) {
     checkboxWrap.innerHTML = '';
@@ -2037,7 +2058,7 @@ function sortChildrenByAttendanceDay(children) {
 }
 
 function computeMonthlyAttendanceData(year, month) {
-  const children = sortChildrenByAttendanceDay(getVisibleChildren());
+  const children = sortChildrenByAttendanceDay(getOwnChildren());
   const lastDay = new Date(year, month, 0).getDate();
   const dateList = Array.from({ length: lastDay }, (_, i) => i + 1);
 
