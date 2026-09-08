@@ -285,6 +285,11 @@ body {
   font-weight: 400;
 }
 
+.att-count-mark {
+  font-size: .6rem;
+  font-weight: 700;
+}
+
 .attendance-row {
   display: flex;
   align-items: center;
@@ -316,6 +321,18 @@ body {
   border-color: var(--danger);
   background: #fee2e2;
   color: #991b1b;
+}
+
+.present-count-select {
+  padding: .35rem .5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: .85rem;
+}
+
+.present-count-select:disabled {
+  background: #f1f5f9;
+  color: var(--text-muted);
 }
 
 .absence-reason {

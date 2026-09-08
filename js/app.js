@@ -115,6 +115,9 @@ const PAYMENT_ACCOUNTS = {
 
 const CLASS_DURATION_MIN = 40;
 const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
+// 출석 1회당 급여를 받는 시스템이라, 하루 출석을 1회가 아닌 값으로도 기록할 수 있게 함
+// (하루 두 번 오면 2, 20분씩 나눠서 오면 0.5 등)
+const PRESENT_COUNT_OPTIONS = [0.5, 1, 1.5, 2];
 
 function getAgeString(birthDate) {
   if (!birthDate) return '';
@@ -478,7 +481,12 @@ async function loadAllData() {
   data.attendance = {};
   (attendanceRes.data || []).forEach((row) => {
     if (!data.attendance[row.date]) data.attendance[row.date] = {};
-    data.attendance[row.date][row.child_id] = { status: row.status, reason: row.reason || '', makeupTime: row.makeup_time || '' };
+    data.attendance[row.date][row.child_id] = {
+      status: row.status,
+      reason: row.reason || '',
+      makeupTime: row.makeup_time || '',
+      count: row.count != null ? Number(row.count) : 1,
+    };
   });
 
   data.monthlyFees = {};
@@ -1375,7 +1383,8 @@ function renderAttendance() {
   if (!extraChildIdsByDate[key]) extraChildIdsByDate[key] = [];
   const extraIds = extraChildIdsByDate[key];
 
-  const visible = getVisibleChildren();
+  // 오늘 출석은 관리자여도 본인 담당 대상자만 보이게 한다 (다른 화면의 "관리자는 전체 보기"와는 별개).
+  const visible = data.children.filter((c) => c.teacher === currentUser.name);
   const scheduled = visible
     .filter((c) => c.days.includes(todayDow))
     .sort((a, b) => (a.dayTimes?.[todayDow] || '').localeCompare(b.dayTimes?.[todayDow] || ''));
@@ -1440,8 +1449,9 @@ function renderAttendance() {
       const cardsHtml = groups
         .get(time)
         .map((c) => {
-          const record = data.attendance[key][c.id] || { status: '', reason: '', makeupTime: '' };
+          const record = data.attendance[key][c.id] || { status: '', reason: '', makeupTime: '', count: 1 };
           const isAbsent = record.status === 'absent';
+          const isPresent = record.status === 'present';
           const isMakeup = !scheduledIds.has(c.id);
           const timeDisplay = isMakeup
             ? `<select class="makeup-time-select">
@@ -1449,6 +1459,10 @@ function renderAttendance() {
                 ${makeupTimeOptions.map((t) => `<option value="${t}" ${t === record.makeupTime ? 'selected' : ''}>${t}</option>`).join('')}
               </select>`
             : esc((c.dayTimes?.[todayDow] || '').slice(0, 5));
+          const countValue = record.count ?? 1;
+          const countSelect = `<select class="present-count-select" ${isPresent ? '' : 'disabled'} title="이 날 출석 횟수 (하루 2번 오면 2, 20분씩 나눠 오면 0.5)">
+              ${PRESENT_COUNT_OPTIONS.map((v) => `<option value="${v}" ${v === countValue ? 'selected' : ''}>${v}회</option>`).join('')}
+            </select>`;
           return `
           <div class="card" data-child="${c.id}">
             <div class="child-name">${esc(c.name)}${isMakeup ? ' <span class="badge makeup-badge">보강</span>' : ''}</div>
@@ -1458,6 +1472,7 @@ function renderAttendance() {
                 <button class="status-btn ${record.status === 'present' ? 'active-present' : ''}" data-status="present">출석</button>
                 <button class="status-btn ${record.status === 'absent' ? 'active-absent' : ''}" data-status="absent">결석</button>
               </div>
+              ${countSelect}
               <input class="absence-reason" placeholder="결석 사유" value="${esc(record.reason)}"
                 ${isAbsent ? '' : 'disabled'}>
               ${isMakeup ? '<button type="button" class="btn btn-sm btn-danger remove-makeup">제외</button>' : ''}
@@ -1491,29 +1506,30 @@ function renderAttendance() {
         const reason = status === 'absent' ? (data.attendance[key][cid]?.reason || '') : '';
 
         const makeupTime = data.attendance[key][cid]?.makeupTime || '';
+        const count = data.attendance[key][cid]?.count ?? 1;
         const { error } = await supabaseClient
           .from('attendance')
-          .upsert({ child_id: cid, date: key, status, reason, makeup_time: makeupTime || null }, { onConflict: 'child_id,date' });
+          .upsert({ child_id: cid, date: key, status, reason, makeup_time: makeupTime || null, count }, { onConflict: 'child_id,date' });
         if (error) {
           console.error(error);
           alert('출석 저장 중 오류가 발생했습니다.');
           return;
         }
 
-        data.attendance[key][cid] = { status, reason, makeupTime };
+        data.attendance[key][cid] = { status, reason, makeupTime, count };
         renderAttendance();
       });
     });
     const reasonInput = card.querySelector('.absence-reason');
     reasonInput?.addEventListener('input', () => {
-      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: 'absent', reason: '', makeupTime: '' };
+      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: 'absent', reason: '', makeupTime: '', count: 1 };
       data.attendance[key][cid].reason = reasonInput.value;
       saveReasonDebounced(cid, reasonInput.value);
     });
 
     card.querySelector('.makeup-time-select')?.addEventListener('change', async (e) => {
       const time = e.target.value;
-      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: '', reason: '', makeupTime: '' };
+      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: '', reason: '', makeupTime: '', count: 1 };
       data.attendance[key][cid].makeupTime = time;
       const { error } = await supabaseClient
         .from('attendance')
@@ -1524,12 +1540,36 @@ function renderAttendance() {
             status: data.attendance[key][cid].status || '',
             reason: data.attendance[key][cid].reason || '',
             makeup_time: time || null,
+            count: data.attendance[key][cid].count ?? 1,
           },
           { onConflict: 'child_id,date' }
         );
       if (error) {
         console.error(error);
         alert('보강 시간 저장 중 오류가 발생했습니다.');
+      }
+    });
+
+    card.querySelector('.present-count-select')?.addEventListener('change', async (e) => {
+      const count = Number(e.target.value);
+      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: 'present', reason: '', makeupTime: '', count: 1 };
+      data.attendance[key][cid].count = count;
+      const { error } = await supabaseClient
+        .from('attendance')
+        .upsert(
+          {
+            child_id: cid,
+            date: key,
+            status: data.attendance[key][cid].status || 'present',
+            reason: data.attendance[key][cid].reason || '',
+            makeup_time: data.attendance[key][cid].makeupTime || null,
+            count,
+          },
+          { onConflict: 'child_id,date' }
+        );
+      if (error) {
+        console.error(error);
+        alert('출석 횟수 저장 중 오류가 발생했습니다.');
       }
     });
 
@@ -2012,8 +2052,9 @@ function computeMonthlyAttendanceData(year, month) {
       if (!record || !record.status) return { type: isScheduled ? 'empty' : 'noclass' };
       const isMakeup = !isScheduled;
       if (record.status === 'present') {
-        presentCount++;
-        return { type: 'present', isMakeup };
+        const count = record.count ?? 1;
+        presentCount += count;
+        return { type: 'present', isMakeup, count };
       }
       return { type: 'absent', reason: record.reason || '', isMakeup };
     });
@@ -2050,7 +2091,10 @@ function renderMonthlyAttendance() {
           if (cell.type === 'noclass') return '<td class="att-noclass"></td>';
           if (cell.type === 'empty') return '<td class="att-empty">-</td>';
           const makeupMark = cell.isMakeup ? '<br><span class="att-makeup-mark">(보강)</span>' : '';
-          if (cell.type === 'present') return `<td class="att-present">출석${makeupMark}</td>`;
+          if (cell.type === 'present') {
+            const countMark = cell.count !== 1 ? `<br><span class="att-count-mark">${cell.count}회</span>` : '';
+            return `<td class="att-present">출석${countMark}${makeupMark}</td>`;
+          }
           // 인쇄할 때 이름 밑에 사유가 길게 붙어 칸이 이상해지는 문제가 있어, 화면에는 사유를 바로 표시하지
           // 않고 클릭하면 그 날의 결석 사유를 볼 수 있게 한다 (인쇄물에는 "결석"만 나감).
           const hasReason = !!cell.reason;
