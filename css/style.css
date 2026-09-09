@@ -213,6 +213,65 @@ body {
   color: var(--text-muted);
 }
 
+.journal-layout {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+.journal-name-list {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  max-height: 70vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .5rem;
+  background: var(--surface);
+}
+
+.journal-name-item {
+  text-align: left;
+  padding: .5rem .6rem;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  font-size: .9rem;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.journal-name-item:hover {
+  background: var(--bg);
+}
+
+.journal-name-item.active {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+}
+
+.journal-detail {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  min-height: 200px;
+}
+
+@media (max-width: 600px) {
+  .journal-layout {
+    grid-template-columns: 1fr;
+  }
+  .journal-name-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    max-height: none;
+  }
+}
+
 .child-name { font-weight: 700; font-size: 1rem; }
 .child-meta { color: var(--text-muted); font-size: .85rem; margin-top: .15rem; }
 
@@ -369,6 +428,20 @@ body {
   color: var(--text-muted);
 }
 
+.service-note {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: .5rem;
+  padding: .4rem .6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: .85rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 2.4rem;
+}
+
 .empty-msg {
   text-align: center;
   color: var(--text-muted);
@@ -403,6 +476,14 @@ body {
 .fee-item .label { color: var(--text-muted); font-size: .75rem; }
 .fee-item .value { font-weight: 700; font-size: 1rem; margin-top: .15rem; }
 .fee-deduct { color: var(--danger); }
+.fee-deduct-labels { font-weight: 400; color: var(--text-muted); }
+
+.fee-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .5rem;
+}
 
 .text-muted { font-size: .8rem; color: var(--text-muted); }
 

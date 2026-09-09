@@ -53,10 +53,11 @@
       </div>
       <nav class="nav-tabs">
         <button class="tab active" data-tab="attendance">오늘 출석</button>
-        <button class="tab" data-tab="schedule">시간표</button>
-        <button class="tab" data-tab="children">대상자 관리</button>
+        <button class="tab" data-tab="journal">개별 일지</button>
         <button class="tab" data-tab="fees">월 수업료 산정</button>
         <button class="tab" data-tab="monthlyAttendance">월 출석부</button>
+        <button class="tab" data-tab="schedule">시간표</button>
+        <button class="tab" data-tab="children">대상자 관리</button>
         <button class="tab hidden" data-tab="settings" id="tabSettings">선생님 관리</button>
       </nav>
     </header>
@@ -144,6 +145,18 @@
         <div id="attendancePrintArea">
           <h3 id="attPrintTitle" class="print-only"></h3>
           <div id="monthlyAttendanceTableWrap"></div>
+        </div>
+      </section>
+
+      <section id="journal" class="panel">
+        <div class="panel-header">
+          <h2>개별 일지</h2>
+        </div>
+        <div class="journal-layout">
+          <div class="journal-name-list" id="journalNameList"></div>
+          <div class="journal-detail" id="journalDetail">
+            <p class="empty-msg">왼쪽에서 아이를 선택해 주세요.</p>
+          </div>
         </div>
       </section>
 
@@ -237,6 +250,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script src="js/config.js"></script>
   <script src="js/app.js"></script>
 </body>

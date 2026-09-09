@@ -281,7 +281,7 @@ function needsCopayField(child) {
 function calculateMonthlyFee(child, sessionCount) {
   const subject = SUBJECTS[child.subject];
   if (!subject) {
-    return { baseTotal: 0, voucherDeduction: 0, extra6Amount: 0, extra7Amount: 0, extraAmount: 0, additionalPayment: 0, copay: 0, breakdown: [], rate: 0 };
+    return { baseTotal: 0, voucherDeduction: 0, voucherDeductionLabels: [], extra6Amount: 0, extra7Amount: 0, extraAmount: 0, additionalPayment: 0, copay: 0, breakdown: [], rate: 0 };
   }
 
   const rate = subject.rate;
@@ -333,13 +333,20 @@ function calculateMonthlyFee(child, sessionCount) {
   const copay = getCopayAmount(child, sessionCount);
   const additionalPayment = baseTotal - developmentalDeduction - developmentalCopay - otherDeduction;
 
+  // "바우처 차감" 합계가 어떤 바우처들 때문인지 화면에 같이 보여주기 위한 라벨
+  const voucherDeductionLabels = [];
+  if (developmentalDeduction > 0) voucherDeductionLabels.push('발달재활');
+  if (types.includes('edu-therapy')) voucherDeductionLabels.push('치료지원');
+  if (types.includes('edu-afterschool')) voucherDeductionLabels.push('방과 후');
+  if (types.includes('sports')) voucherDeductionLabels.push('스포츠');
+
   if (copay > 0) {
     breakdown.push(`본인부담금 (별도 납부): ${formatCurrency(copay)}`);
   }
 
   breakdown.push(`→ 추가금 납부액: ${formatCurrency(additionalPayment)}`);
 
-  return { baseTotal, voucherDeduction, extra6Amount, extra7Amount, extraAmount, additionalPayment, copay, breakdown, rate };
+  return { baseTotal, voucherDeduction, voucherDeductionLabels, extra6Amount, extra7Amount, extraAmount, additionalPayment, copay, breakdown, rate };
 }
 
 // 이월 금액 차감은 추가납부액에서만 반영하고 본인부담금(copay)에는 영향을 주지 않는다.
@@ -434,6 +441,7 @@ let historyYear = new Date().getFullYear();
 let extraChildIdsByDate = {};
 let childrenSortMode = 'recent';
 let openTeacherGroups = new Set(); // 대상자 관리에서 펼쳐놓은 선생님 구역(기본은 다 접힘)
+let journalSelectedChildId = null;
 let attendanceViewDate = new Date();
 let feesIncludedIds = new Set(); // 기본값: 아무도 선택 안 됨 (필요한 친구만 직접 선택)
 
@@ -493,6 +501,7 @@ async function loadAllData() {
       reason: row.reason || '',
       makeupTime: row.makeup_time || '',
       count: row.count != null ? Number(row.count) : 1,
+      note: row.note || '',
     };
   });
 
@@ -1109,6 +1118,7 @@ function switchTab(name) {
   if (name === 'children') renderChildren();
   if (name === 'fees') renderFees();
   if (name === 'monthlyAttendance') renderMonthlyAttendance();
+  if (name === 'journal') renderJournal();
   if (name === 'settings') renderPasswordSettings();
 }
 
@@ -1118,6 +1128,7 @@ function renderAll() {
   renderChildren();
   renderFees();
   renderMonthlyAttendance();
+  renderJournal();
   if (isAdmin()) renderPasswordSettings();
 }
 
@@ -1506,6 +1517,7 @@ function renderAttendance() {
                 ${isAbsent ? '' : 'disabled'}>
               ${isMakeup ? '<button type="button" class="btn btn-sm btn-danger remove-makeup">제외</button>' : ''}
             </div>
+            <textarea class="service-note" placeholder="금일 서비스 제공내용 및 특이사항">${esc(record.note || '')}</textarea>
           </div>`;
         })
         .join('');
@@ -1527,6 +1539,16 @@ function renderAttendance() {
     }
   }, 600);
 
+  const saveNoteDebounced = debounce(async (cid, note) => {
+    const { error } = await supabaseClient
+      .from('attendance')
+      .upsert({ child_id: cid, date: key, status: data.attendance[key][cid]?.status || '', note }, { onConflict: 'child_id,date' });
+    if (error) {
+      console.error(error);
+      alert('일지 저장 중 오류가 발생했습니다.');
+    }
+  }, 600);
+
   list.querySelectorAll('.card').forEach((card) => {
     const cid = card.dataset.child;
     card.querySelectorAll('[data-status]').forEach((btn) => {
@@ -1536,6 +1558,7 @@ function renderAttendance() {
 
         const makeupTime = data.attendance[key][cid]?.makeupTime || '';
         const count = data.attendance[key][cid]?.count ?? 1;
+        const note = data.attendance[key][cid]?.note || '';
         const { error } = await supabaseClient
           .from('attendance')
           .upsert({ child_id: cid, date: key, status, reason, makeup_time: makeupTime || null, count }, { onConflict: 'child_id,date' });
@@ -1545,15 +1568,22 @@ function renderAttendance() {
           return;
         }
 
-        data.attendance[key][cid] = { status, reason, makeupTime, count };
+        data.attendance[key][cid] = { status, reason, makeupTime, count, note };
         renderAttendance();
       });
     });
     const reasonInput = card.querySelector('.absence-reason');
     reasonInput?.addEventListener('input', () => {
-      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: 'absent', reason: '', makeupTime: '', count: 1 };
+      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: 'absent', reason: '', makeupTime: '', count: 1, note: '' };
       data.attendance[key][cid].reason = reasonInput.value;
       saveReasonDebounced(cid, reasonInput.value);
+    });
+
+    const noteInput = card.querySelector('.service-note');
+    noteInput?.addEventListener('input', () => {
+      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: '', reason: '', makeupTime: '', count: 1, note: '' };
+      data.attendance[key][cid].note = noteInput.value;
+      saveNoteDebounced(cid, noteInput.value);
     });
 
     card.querySelector('.makeup-time-select')?.addEventListener('change', async (e) => {
@@ -1669,6 +1699,130 @@ async function persistFeeRecord(childId) {
 
 const persistFeeRecordDebounced = debounce(persistFeeRecord, 600);
 
+// 학부모에게 카톡 등으로 보내기 좋게, 이용료 정산 내역만 깔끔하게 1:1 정사각형 이미지로 캡쳐한다.
+async function captureFeeSummary(childId) {
+  const child = data.children.find((c) => c.id === childId);
+  if (!child) return;
+
+  const feeRec = getFeeRecord(childId);
+  const fee = calculateMonthlyFee(child, feeRec.sessionCount);
+  const netAdditional = getNetAdditionalPayment(fee, feeRec);
+  const showCopay = needsCopayField(child);
+
+  const basisLabel = `${SUBJECTS[child.subject]?.label || ''} ${feeRec.sessionCount}회`;
+  const accountNotes = [`추가금: ${PAYMENT_ACCOUNTS.additional}`];
+  if (showCopay && fee.copay > 0) accountNotes.push(`본인부담금: ${getCopayAccountNote(child)}`);
+
+  // 6·7회차 추가금은 이미 추가납부액 계산에 녹아 있는 설명용 숫자라, 별도 줄로 또 보여주면
+  // "추가납부액에 이 만큼이 더 붙는다"로 오해하기 쉬워서 안내 표에서는 뺀다.
+  const infoRows = [{ label: '총 금액', sub: basisLabel, value: formatCurrency(fee.baseTotal) }];
+  if (fee.voucherDeduction > 0) {
+    infoRows.push({
+      label: `바우처 차감 (${fee.voucherDeductionLabels.join(', ')})`,
+      value: `-${formatCurrency(fee.voucherDeduction)}`,
+      deduct: true,
+    });
+  }
+  if ((feeRec.carryoverAmount || 0) > 0) {
+    infoRows.push({ label: '이월 금액 차감', value: `-${formatCurrency(feeRec.carryoverAmount)}`, deduct: true });
+  }
+
+  // 실제로 납부해야 하는 금액만 따로 네모 박스에 모아서 눈에 띄게 보여준다.
+  const payRows = [{ label: '추가납부액', value: formatCurrency(netAdditional) }];
+  if (showCopay && fee.copay > 0) {
+    payRows.push({ label: '본인부담금', value: formatCurrency(fee.copay) });
+  }
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText =
+    'position:fixed; left:-9999px; top:0; width:600px; padding:40px; background:#ffffff; box-sizing:border-box; font-family:inherit;';
+  wrap.innerHTML = `
+    <div style="text-align:center; margin-bottom:24px;">
+      <div style="font-size:22px; font-weight:800; color:#111827;">${esc(child.name)} 이용료 정산 내역</div>
+      <div style="font-size:15px; color:#6b7280; margin-top:4px;">${feeViewYear}년 ${feeViewMonth}월</div>
+    </div>
+    <table style="width:100%; border-collapse:collapse; font-size:16px;">
+      ${infoRows
+        .map(
+          (r) => `
+        <tr>
+          <td style="padding:12px 6px; border-bottom:1px solid #e5e7eb; color:#4b5563; vertical-align:top;">
+            ${esc(r.label)}
+            ${r.sub ? `<div style="font-size:12px; color:#9ca3af; font-weight:400; margin-top:2px;">${esc(r.sub)}</div>` : ''}
+          </td>
+          <td style="padding:12px 6px; border-bottom:1px solid #e5e7eb; text-align:right; font-weight:700; color:${r.deduct ? '#2563eb' : '#111827'};">${r.value}</td>
+        </tr>`
+        )
+        .join('')}
+    </table>
+    <div style="margin-top:20px; border:2px solid #111827; border-radius:12px; padding:16px 20px;">
+      <div style="font-size:14px; font-weight:700; color:#111827; margin-bottom:10px;">💰 납부하실 금액</div>
+      ${payRows
+        .map(
+          (r) => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0;">
+          <div style="font-size:16px; color:#374151;">${esc(r.label)}</div>
+          <div style="font-size:20px; font-weight:800; color:#111827;">${r.value}</div>
+        </div>`
+        )
+        .join('')}
+    </div>
+    <div style="margin-top:16px; font-size:13px; color:#6b7280; line-height:1.6;">
+      ${accountNotes.map((n) => esc(n)).join('<br>')}
+    </div>
+    <div style="margin-top:28px; text-align:center;">
+      <img src="assets/logo.png" style="width:220px; height:auto;">
+    </div>`;
+  document.body.appendChild(wrap);
+
+  try {
+    const logoImg = wrap.querySelector('img');
+    if (logoImg && !logoImg.complete) {
+      await new Promise((resolve) => {
+        logoImg.addEventListener('load', resolve, { once: true });
+        logoImg.addEventListener('error', resolve, { once: true });
+      });
+    }
+    const canvas = await html2canvas(wrap, { backgroundColor: '#ffffff', scale: 2 });
+    const size = Math.max(canvas.width, canvas.height);
+    const squareCanvas = document.createElement('canvas');
+    squareCanvas.width = size;
+    squareCanvas.height = size;
+    const ctx = squareCanvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, size, size);
+    ctx.drawImage(canvas, (size - canvas.width) / 2, (size - canvas.height) / 2);
+
+    // 파일로 내려받지 않고 클립보드에만 복사해서, 카톡 등에 바로 붙여넣을 수 있게 한다.
+    let copied = false;
+    try {
+      const blob = await new Promise((resolve) => squareCanvas.toBlob(resolve, 'image/png'));
+      if (blob && navigator.clipboard?.write) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        copied = true;
+      }
+    } catch (clipErr) {
+      console.error(clipErr);
+    }
+
+    if (copied) {
+      alert('복사되었습니다.');
+    } else {
+      // 클립보드 복사가 안 되는 브라우저는 파일 저장으로 대신한다.
+      const link = document.createElement('a');
+      link.download = `${child.name}_${feeViewYear}-${String(feeViewMonth).padStart(2, '0')}_이용료.png`;
+      link.href = squareCanvas.toDataURL('image/png');
+      link.click();
+      alert('이 브라우저에서는 클립보드 복사가 지원되지 않아 파일로 저장했습니다.');
+    }
+  } catch (err) {
+    console.error(err);
+    alert('이미지 캡쳐 중 오류가 발생했습니다.');
+  } finally {
+    document.body.removeChild(wrap);
+  }
+}
+
 function renderFees() {
   document.getElementById('feeMonthLabel').textContent = `${feeViewYear}년 ${feeViewMonth}월`;
   const list = document.getElementById('feesList');
@@ -1746,7 +1900,10 @@ function renderFees() {
 
       return `
       <div class="card fee-card" data-fee-child="${c.id}">
-        <div class="child-name child-name-link" data-history="${c.id}">${esc(c.name)}</div>
+        <div class="fee-card-top">
+          <div class="child-name child-name-link" data-history="${c.id}">${esc(c.name)}</div>
+          <button type="button" class="btn btn-sm capture-fee-btn">📸 이용료 캡쳐</button>
+        </div>
         <div class="child-meta">
           ${getDayLabels(c.days)} · ${SUBJECTS[c.subject]?.label} ·
           ${esc(c.paymentTypes?.length ? c.paymentTypes.map((t) => PAYMENT_TYPES[t] || t).join(' + ') : PAYMENT_TYPES.none)}
@@ -1767,7 +1924,7 @@ function renderFees() {
           </div>
           ${fee.voucherDeduction > 0 ? `
           <div class="fee-item">
-            <div class="label">바우처 차감</div>
+            <div class="label">바우처 차감 <span class="fee-deduct-labels">(${esc(fee.voucherDeductionLabels.join(', '))})</span></div>
             <div class="value fee-deduct">-${formatCurrency(fee.voucherDeduction)}</div>
           </div>` : ''}
           ${fee.extra6Amount > 0 ? `
@@ -1832,6 +1989,7 @@ function renderFees() {
     const cid = card.dataset.feeChild;
 
     card.querySelector('[data-history]')?.addEventListener('click', () => openChildHistoryModal(cid));
+    card.querySelector('.capture-fee-btn')?.addEventListener('click', () => captureFeeSummary(cid));
 
     card.querySelector('.session-count')?.addEventListener('change', async (e) => {
       getFeeRecord(cid).sessionCount = Math.max(0, Number(e.target.value) || 0);
@@ -2161,6 +2319,78 @@ function renderMonthlyAttendance() {
       alert(`${attViewMonth}월 ${day}일 ${child?.name || ''} 결석 사유\n${reason || '(사유 없음)'}`);
     });
   });
+}
+
+// 아이별로 그동안 적어온 "금일 서비스 제공내용 및 특이사항"을 날짜순으로 모아서 보여준다.
+function renderJournal() {
+  const nameList = document.getElementById('journalNameList');
+  const detail = document.getElementById('journalDetail');
+  const children = getOwnChildren()
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+
+  if (!children.length) {
+    nameList.innerHTML = '';
+    detail.innerHTML = '<p class="empty-msg">등록된 대상자가 없습니다.</p>';
+    return;
+  }
+
+  if (journalSelectedChildId && !children.some((c) => c.id === journalSelectedChildId)) {
+    journalSelectedChildId = null;
+  }
+
+  nameList.innerHTML = children
+    .map(
+      (c) => `
+    <button type="button" class="journal-name-item ${c.id === journalSelectedChildId ? 'active' : ''}" data-child="${c.id}">
+      ${esc(c.name)}
+    </button>`
+    )
+    .join('');
+
+  nameList.querySelectorAll('.journal-name-item').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      journalSelectedChildId = btn.dataset.child;
+      renderJournal();
+    });
+  });
+
+  if (!journalSelectedChildId) {
+    detail.innerHTML = '<p class="empty-msg">왼쪽에서 아이를 선택해 주세요.</p>';
+    return;
+  }
+
+  const child = children.find((c) => c.id === journalSelectedChildId);
+  const entries = [];
+  Object.keys(data.attendance).forEach((dateStr) => {
+    const record = data.attendance[dateStr]?.[journalSelectedChildId];
+    if (record?.note) entries.push({ date: dateStr, note: record.note });
+  });
+  entries.sort((a, b) => b.date.localeCompare(a.date));
+
+  if (!entries.length) {
+    detail.innerHTML = `
+      <h3>${esc(child.name)}</h3>
+      <p class="empty-msg">기록된 일지가 없습니다.</p>`;
+    return;
+  }
+
+  const rows = entries
+    .map(({ date, note }) => {
+      const d = new Date(date);
+      const label = `${d.getMonth() + 1}/${d.getDate()}`;
+      return `<tr><td>${esc(label)}</td><td>${esc(note)}</td></tr>`;
+    })
+    .join('');
+
+  detail.innerHTML = `
+    <h3>${esc(child.name)}</h3>
+    <div class="payment-table-wrap">
+      <table class="payment-table">
+        <thead><tr><th>날짜</th><th>서비스 제공내용 및 특이사항</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
 
 function renderPasswordSettings() {
