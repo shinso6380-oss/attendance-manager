@@ -2068,7 +2068,7 @@ function renderSchedule() {
       const end = addMinutesToTime(t, CLASS_DURATION_MIN);
       const cells = scheduleDays
         .map((d) => {
-          const kids = children.filter((c) => c.dayTimes[d.value] === t);
+          const kids = children.filter((c) => c.dayTimes[d.value] === t).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
           const content = kids
             .map((c) => {
               const voucherTags = c.paymentTypes?.length
@@ -2132,7 +2132,9 @@ function exportScheduleExcel() {
 
   times.forEach((t) => {
     const end = addMinutesToTime(t, CLASS_DURATION_MIN);
-    const kidsByDay = scheduleDays.map((d) => children.filter((c) => c.dayTimes[d.value] === t));
+    const kidsByDay = scheduleDays.map((d) =>
+      children.filter((c) => c.dayTimes[d.value] === t).sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+    );
     const maxKids = Math.max(1, ...kidsByDay.map((kids) => kids.length));
     const startRow = aoa.length;
 
