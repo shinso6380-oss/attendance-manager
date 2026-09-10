@@ -247,13 +247,36 @@ function getDayTimeLabel(child) {
     .join(', ');
 }
 
+// 대한민국 법정공휴일 — 수업 일수 자동 계산에서 제외한다.
+// 설날/추석/부처님오신날처럼 음력 기준이거나 대체공휴일이 붙는 날짜는 해마다 바뀌므로,
+// 새해가 되면 그 해 날짜를 여기에 추가해줘야 한다.
+const KR_HOLIDAYS = new Set([
+  // 2026년
+  '2026-01-01', // 신정
+  '2026-02-16', '2026-02-17', '2026-02-18', // 설날 연휴
+  '2026-03-02', // 삼일절 대체공휴일 (3/1이 일요일)
+  '2026-05-05', // 어린이날
+  '2026-05-25', // 부처님오신날 대체공휴일 (5/24가 일요일)
+  '2026-06-06', // 현충일
+  '2026-08-15', // 광복절
+  '2026-09-24', '2026-09-25', '2026-09-26', // 추석 연휴
+  '2026-10-03', // 개천절
+  '2026-10-09', // 한글날
+  '2026-12-25', // 성탄절
+]);
+
+function isKoreanHoliday(date) {
+  return KR_HOLIDAYS.has(dateKey(date));
+}
+
 function countSessionsInMonth(year, month, days) {
   if (!days?.length) return 0;
   const daySet = new Set(days);
   const lastDay = new Date(year, month, 0).getDate();
   let count = 0;
   for (let d = 1; d <= lastDay; d++) {
-    if (daySet.has(new Date(year, month - 1, d).getDay())) count++;
+    const date = new Date(year, month - 1, d);
+    if (daySet.has(date.getDay()) && !isKoreanHoliday(date)) count++;
   }
   return count;
 }
@@ -1710,8 +1733,10 @@ async function captureFeeSummary(childId) {
   const showCopay = needsCopayField(child);
 
   const basisLabel = `${SUBJECTS[child.subject]?.label || ''} ${feeRec.sessionCount}회`;
-  const accountNotes = [`추가금: ${PAYMENT_ACCOUNTS.additional}`];
-  if (showCopay && fee.copay > 0) accountNotes.push(`본인부담금: ${getCopayAccountNote(child)}`);
+  const accountNotes = [{ label: '추가금 입금 계좌', account: PAYMENT_ACCOUNTS.additional }];
+  if (showCopay && fee.copay > 0) {
+    accountNotes.push({ label: '본인부담금 입금 계좌', account: getCopayAccountNote(child) });
+  }
 
   // 6·7회차 추가금은 이미 추가납부액 계산에 녹아 있는 설명용 숫자라, 별도 줄로 또 보여주면
   // "추가납부액에 이 만큼이 더 붙는다"로 오해하기 쉬워서 안내 표에서는 뺀다.
@@ -1767,10 +1792,16 @@ async function captureFeeSummary(childId) {
         )
         .join('')}
     </div>
-    <div style="margin-top:16px; font-size:13px; color:#6b7280; line-height:1.6;">
-      ${accountNotes.map((n) => esc(n)).join('<br>')}
+    <div style="margin-top:18px;">
+      ${accountNotes
+        .map(
+          (n) => `
+        <div style="font-size:12px; color:#9ca3af; margin-bottom:3px;">${esc(n.label)}</div>
+        <div style="font-size:15px; font-weight:700; color:#111827; margin-bottom:10px;">${esc(n.account)}</div>`
+        )
+        .join('')}
     </div>
-    <div style="margin-top:28px; text-align:center;">
+    <div style="margin-top:20px; text-align:center;">
       <img src="assets/logo.png" style="width:220px; height:auto;">
     </div>`;
   document.body.appendChild(wrap);
