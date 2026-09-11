@@ -372,9 +372,23 @@ function calculateMonthlyFee(child, sessionCount) {
   return { baseTotal, voucherDeduction, voucherDeductionLabels, extra6Amount, extra7Amount, extraAmount, additionalPayment, copay, breakdown, rate };
 }
 
+// 담당 과목이 아닌 "다른 과목"의 과목 키를 반환한다 (과목은 심리운동/언어재활 둘뿐이라 그냥 반대쪽을 찾음).
+function getOtherSubject(subjectKey) {
+  return Object.keys(SUBJECTS).find((k) => k !== subjectKey) || subjectKey;
+}
+
+// 다과목 결제(담당 과목 외 추가)가 필요한 달에만 월 수업료 산정 화면에서 켜서 쓰는 금액.
+// 요일/시간표가 따로 없어 자동 회차 계산이 불가능하므로, 매달 직접 입력한 횟수(extraSessionCount) ×
+// 그 과목 요율로만 계산한다 (바우처 차감 등은 적용하지 않음).
+function getExtraSubjectFee(child, feeRec) {
+  if (!feeRec?.extraSubjectEnabled) return 0;
+  const rate = SUBJECTS[getOtherSubject(child?.subject)]?.rate || 0;
+  return (feeRec?.extraSessionCount || 0) * rate;
+}
+
 // 이월 금액 차감은 추가납부액에서만 반영하고 본인부담금(copay)에는 영향을 주지 않는다.
-function getNetAdditionalPayment(fee, feeRec) {
-  return fee.additionalPayment - (feeRec?.carryoverAmount || 0);
+function getNetAdditionalPayment(fee, feeRec, child) {
+  return fee.additionalPayment - (feeRec?.carryoverAmount || 0) + getExtraSubjectFee(child, feeRec);
 }
 
 function dateKey(date = new Date()) {
@@ -538,6 +552,8 @@ async function loadAllData() {
       additionalPaid: row.additional_paid || false,
       additionalPaymentMethod: row.additional_payment_method || '',
       carryoverAmount: row.carryover_amount || 0,
+      extraSubjectEnabled: row.extra_subject_enabled || false,
+      extraSessionCount: row.extra_session_count || 0,
       copayDepositDate: row.copay_deposit_date || '',
       copayAmount: row.copay_amount ?? null,
       copayPaid: row.copay_paid || false,
@@ -767,7 +783,7 @@ function getMonthlyFeeAmounts(childId, year, month) {
   const rec = data.monthlyFees[mk]?.[childId];
   const sessionCount = rec?.sessionCount ?? countSessionsInMonth(year, month, child.days);
   const fee = calculateMonthlyFee(child, sessionCount);
-  const additional = rec?.additionalAmount ?? getNetAdditionalPayment(fee, rec);
+  const additional = rec?.additionalAmount ?? getNetAdditionalPayment(fee, rec, child);
   const copay = rec?.copayAmount ?? fee.copay;
   return { additional, copay };
 }
@@ -1229,7 +1245,6 @@ function openChildModal(child = null) {
     const radio = childForm.querySelector(`[name="infantSub"][value="${child.infantSub}"]`);
     if (radio) radio.checked = true;
   }
-
   childModal.showModal();
 }
 
@@ -1685,6 +1700,8 @@ function getFeeRecord(childId) {
       additionalPaid: false,
       additionalPaymentMethod: '',
       carryoverAmount: 0,
+      extraSubjectEnabled: false,
+      extraSessionCount: 0,
       copayDepositDate: '',
       copayAmount: null,
       copayPaid: false,
@@ -1707,6 +1724,8 @@ async function persistFeeRecord(childId) {
       additional_paid: rec.additionalPaid || false,
       additional_payment_method: rec.additionalPaymentMethod || null,
       carryover_amount: rec.carryoverAmount || 0,
+      extra_subject_enabled: rec.extraSubjectEnabled || false,
+      extra_session_count: rec.extraSessionCount || 0,
       copay_deposit_date: rec.copayDepositDate || null,
       copay_amount: rec.copayAmount ?? null,
       copay_paid: rec.copayPaid || false,
@@ -1729,7 +1748,7 @@ async function captureFeeSummary(childId) {
 
   const feeRec = getFeeRecord(childId);
   const fee = calculateMonthlyFee(child, feeRec.sessionCount);
-  const netAdditional = getNetAdditionalPayment(fee, feeRec);
+  const netAdditional = getNetAdditionalPayment(fee, feeRec, child);
   const showCopay = needsCopayField(child);
 
   const basisLabel = `${SUBJECTS[child.subject]?.label || ''} ${feeRec.sessionCount}회`;
@@ -1750,6 +1769,14 @@ async function captureFeeSummary(childId) {
   }
   if ((feeRec.carryoverAmount || 0) > 0) {
     infoRows.push({ label: '이월 금액 차감', value: `-${formatCurrency(feeRec.carryoverAmount)}`, deduct: true });
+  }
+  if (feeRec.extraSubjectEnabled && (feeRec.extraSessionCount || 0) > 0) {
+    const otherLabel = SUBJECTS[getOtherSubject(child.subject)]?.label || '';
+    infoRows.push({
+      label: `추가 과목 (${otherLabel})`,
+      sub: `${otherLabel} ${feeRec.extraSessionCount}회`,
+      value: `+${formatCurrency(getExtraSubjectFee(child, feeRec))}`,
+    });
   }
 
   // 실제로 납부해야 하는 금액만 따로 네모 박스에 모아서 눈에 띄게 보여준다.
@@ -1899,7 +1926,7 @@ function renderFees() {
       const sessionCount = feeRec.sessionCount ?? autoCount;
       const fee = calculateMonthlyFee(c, sessionCount);
       const showCopay = needsCopayField(c);
-      const netAdditional = getNetAdditionalPayment(fee, feeRec);
+      const netAdditional = getNetAdditionalPayment(fee, feeRec, c);
 
       const paymentRows = [];
       if (netAdditional !== 0) {
@@ -1946,6 +1973,16 @@ function renderFees() {
           <span class="text-muted">(자동: ${autoCount}회)</span>
           <input type="number" class="session-count" min="0" max="31" value="${sessionCount}">
           <span>회</span>
+        </div>
+
+        <div class="fee-input-row">
+          <label class="paid-check">
+            <input type="checkbox" class="extra-subject-toggle" ${feeRec.extraSubjectEnabled ? 'checked' : ''}>
+            다른 과목도 함께 결제 (${esc(SUBJECTS[getOtherSubject(c.subject)]?.label || '')})
+          </label>
+          ${feeRec.extraSubjectEnabled ? `
+          <input type="number" class="extra-session-count" min="0" max="31" value="${feeRec.extraSessionCount || 0}">
+          <span>회 = ${formatCurrency(getExtraSubjectFee(c, feeRec))}</span>` : ''}
         </div>
 
         <div class="fee-summary">
@@ -2024,6 +2061,18 @@ function renderFees() {
 
     card.querySelector('.session-count')?.addEventListener('change', async (e) => {
       getFeeRecord(cid).sessionCount = Math.max(0, Number(e.target.value) || 0);
+      await persistFeeRecord(cid);
+      renderFees();
+    });
+
+    card.querySelector('.extra-subject-toggle')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).extraSubjectEnabled = e.target.checked;
+      await persistFeeRecord(cid);
+      renderFees();
+    });
+
+    card.querySelector('.extra-session-count')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).extraSessionCount = Math.max(0, Number(e.target.value) || 0);
       await persistFeeRecord(cid);
       renderFees();
     });
@@ -2231,7 +2280,7 @@ function getPaymentStatus(child, year, month) {
   const sessionCount = feeRec?.sessionCount ?? countSessionsInMonth(year, month, child.days);
   const fee = calculateMonthlyFee(child, sessionCount);
 
-  const needsAdditional = getNetAdditionalPayment(fee, feeRec) > 0;
+  const needsAdditional = getNetAdditionalPayment(fee, feeRec, child) > 0;
   const needsCopay = needsCopayField(child) && fee.copay > 0;
   if (!needsAdditional && !needsCopay) return null;
 
@@ -2326,7 +2375,7 @@ function renderMonthlyAttendance() {
         : paymentStatus === 'paid'
           ? '<span class="att-payment-badge paid">납부완료</span>'
           : '';
-      return `<tr><th class="att-name">${esc(c.name)}<span class="att-count">(${presentCount}회)</span>${badge}</th>${cellsHtml}</tr>`;
+      return `<tr><th class="att-name att-name-link" data-child="${c.id}" title="클릭하면 이 아이의 월 수업료 산정으로 이동합니다">${esc(c.name)}<span class="att-count">(${presentCount}회)</span>${badge}</th>${cellsHtml}</tr>`;
     })
     .join('');
 
@@ -2350,6 +2399,15 @@ function renderMonthlyAttendance() {
       const key = dateKey(new Date(attViewYear, attViewMonth - 1, day));
       const reason = child ? data.attendance[key]?.[child.id]?.reason : '';
       alert(`${attViewMonth}월 ${day}일 ${child?.name || ''} 결석 사유\n${reason || '(사유 없음)'}`);
+    });
+  });
+
+  wrap.querySelectorAll('.att-name-link').forEach((th) => {
+    th.addEventListener('click', () => {
+      const cid = th.dataset.child;
+      feesIncludedIds.add(cid);
+      switchTab('fees');
+      document.querySelector(`.fee-card[data-fee-child="${cid}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   });
 }

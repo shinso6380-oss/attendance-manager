@@ -664,6 +664,15 @@ body {
   gap: .3rem;
 }
 
+.monthly-attendance-table .att-name-link {
+  cursor: pointer;
+}
+
+.monthly-attendance-table .att-name-link:hover {
+  text-decoration: underline;
+  color: var(--primary);
+}
+
 .att-count {
   font-weight: 400;
   font-size: .65rem;
