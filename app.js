@@ -1,0 +1,2575 @@
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const DEFAULT_PASSWORD = '0000';
+
+const SUBJECTS = {
+  psychomotor: { label: '심리운동', rate: 50000 },
+  language: { label: '언어재활', rate: 48000 },
+};
+
+const DAYS = [
+  { value: 0, label: '일' },
+  { value: 1, label: '월' },
+  { value: 2, label: '화' },
+  { value: 3, label: '수' },
+  { value: 4, label: '목' },
+  { value: 5, label: '금' },
+  { value: 6, label: '토' },
+];
+
+const PAYMENT_TYPES = {
+  none: '일반',
+  developmental: '발달바우처',
+  infant: '영유아 바우처',
+  'edu-therapy': '교육청 치료지원',
+  'edu-afterschool': '교육청 방과 후',
+  'edu-umter': '교육청 움터',
+  sports: '스포츠바우처',
+};
+
+const PAYMENT_METHODS = {
+  cash: '현금',
+  card: '카드',
+  ulsanpay: '울산페이',
+};
+
+// 시간표에서만 쓰는 간략 표기 (지정 안 된 유형은 PAYMENT_TYPES 전체 이름 사용)
+const SCHEDULE_VOUCHER_LABELS = {
+  developmental: '발달재활',
+  infant: '영유아',
+  'edu-therapy': '치료지원',
+  'edu-afterschool': '방과 후',
+  sports: '스포츠',
+};
+
+const PAYMENT_TYPE_OPTIONS = ['developmental', 'infant', 'edu-therapy', 'edu-afterschool', 'edu-umter', 'sports'];
+
+const DEVELOPMENTAL_SUBTYPES = {
+  ga: { label: '가형', copay: 20000 },
+  na: { label: '나형', copay: 40000 },
+  ra: { label: '라형', copay: 60000 },
+  ma: { label: '마형', copay: 80000 },
+  da: { label: '다형', copay: 0 },
+};
+
+// 1~5회차: 회당 본인부담금 / 6회차: 6회차 1회분 본인부담금 (출처: 바우처 계산.xlsx)
+const DEVELOPMENTAL_PER_SESSION_COPAY = {
+  psychomotor: { ga: 4000, na: 7500, ra: 11500, ma: 15500, da: 0 },
+  language: { ga: 3840, na: 7200, ra: 11040, ma: 14880, da: 0 },
+};
+const DEVELOPMENTAL_SIXTH_SESSION_COPAY = {
+  psychomotor: { ga: 0, na: 2500, ra: 2500, ma: 2500, da: 0 },
+  language: { ga: 800, na: 4000, ra: 4800, ma: 5600, da: 0 },
+};
+
+function getDevelopmentalCopay(subject, sub, sessionCount) {
+  const perSession = DEVELOPMENTAL_PER_SESSION_COPAY[subject]?.[sub] ?? 0;
+  const sixth = DEVELOPMENTAL_SIXTH_SESSION_COPAY[subject]?.[sub] ?? 0;
+  const normalSessions = Math.min(sessionCount, 5);
+  let copay = perSession * normalSessions;
+  if (sessionCount >= 6) copay += sixth;
+  return copay;
+}
+
+// 1~5회차: 회당 정부지원금(바우처 차감) / 6회차: 6회차 1회분 정부지원금 (출처: 바우처 계산.xlsx)
+const DEVELOPMENTAL_PER_SESSION_VOUCHER = {
+  psychomotor: { ga: 46000, na: 42500, ra: 38500, ma: 34500, da: 0 },
+  language: { ga: 44160, na: 40800, ra: 36960, ma: 33120, da: 0 },
+};
+const DEVELOPMENTAL_SIXTH_SESSION_VOUCHER = {
+  psychomotor: { ga: 10000, na: 7500, ra: 7500, ma: 7500, da: 0 },
+  language: { ga: 19200, na: 16000, ra: 15200, ma: 14400, da: 0 },
+};
+
+function getDevelopmentalVoucherDeduction(subject, sub, sessionCount) {
+  const perSession = DEVELOPMENTAL_PER_SESSION_VOUCHER[subject]?.[sub] ?? 0;
+  const sixth = DEVELOPMENTAL_SIXTH_SESSION_VOUCHER[subject]?.[sub] ?? 0;
+  const normalSessions = Math.min(sessionCount, 5);
+  let deduction = perSession * normalSessions;
+  if (sessionCount >= 6) deduction += sixth;
+  return deduction;
+}
+
+const INFANT_SUBTYPES = {
+  grade1: { label: '1등급', copay: 16000 },
+  grade2: { label: '2등급', copay: 32000 },
+};
+
+const EXTRA_6TH = {
+  psychomotor: 40000,
+  language: 28000,
+};
+
+const EDU_VOUCHER_AMOUNTS = {
+  'edu-therapy': 160000,
+  'edu-afterschool': 120000,
+};
+
+const SPORTS_VOUCHER_AMOUNT = 110000;
+
+const PAYMENT_ACCOUNTS = {
+  copayDevelopmental: '경남은행 207-0064-8191-02 신승오(울산언어심리운동센터)',
+  copayInfant: '경남은행 207-0077-8558-02 신승오(울산언어심리운동센터)',
+  additional: '경남은행 01044946380 신승오 · 울산페이 QR코드 · 신용카드 납부 가능',
+};
+
+const CLASS_DURATION_MIN = 40;
+const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
+// 출석 1회당 급여를 받는 시스템이라, 하루 출석을 1회가 아닌 값으로도 기록할 수 있게 함
+// (하루 두 번 오면 2, 20분씩 나눠서 오면 0.5 등)
+const PRESENT_COUNT_OPTIONS = [0.5, 1, 1.5, 2];
+
+function getAgeString(birthDate) {
+  if (!birthDate) return '';
+  const bd = new Date(birthDate);
+  const now = new Date();
+  let years = now.getFullYear() - bd.getFullYear();
+  let months = now.getMonth() - bd.getMonth();
+  if (now.getDate() < bd.getDate()) months--;
+  if (months < 0) {
+    years--;
+    months += 12;
+  }
+  return `만 ${years}세 ${months}개월`;
+}
+
+function addMinutesToTime(time, minutes) {
+  const [h, m] = time.split(':').map(Number);
+  const total = h * 60 + m + minutes;
+  const hh = String(Math.floor((total % 1440) / 60)).padStart(2, '0');
+  const mm = String(total % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+function getCopayAccountNote(child) {
+  const hasDevelopmental = child.paymentTypes?.includes('developmental');
+  const hasInfant = child.paymentTypes?.includes('infant');
+  if (hasDevelopmental && hasInfant) {
+    return `발달: ${PAYMENT_ACCOUNTS.copayDevelopmental} / 영유아: ${PAYMENT_ACCOUNTS.copayInfant}`;
+  }
+  if (hasInfant) return PAYMENT_ACCOUNTS.copayInfant;
+  return PAYMENT_ACCOUNTS.copayDevelopmental;
+}
+
+const SESSION_KEY = 'attendance-manager-session';
+
+function defaultData() {
+  return { children: [], attendance: {}, monthlyFees: {}, teachers: [] };
+}
+
+function getSession() {
+  try {
+    return JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
+  } catch {
+    return null;
+  }
+}
+
+function setSession(user) {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
+}
+
+function clearSession() {
+  sessionStorage.removeItem(SESSION_KEY);
+}
+
+function isAdmin() {
+  return !!data.teachers.find((t) => t.name === currentUser?.name)?.isAdmin;
+}
+
+function getVisibleChildren() {
+  if (!currentUser) return [];
+  if (isAdmin()) return data.children;
+  return data.children.filter((c) => c.teacher === currentUser.name);
+}
+
+// 관리자여도 본인 담당 대상자만 보여줘야 하는 화면(오늘 출석, 월 수업료 산정, 월 출석부)에서 사용
+function getOwnChildren() {
+  if (!currentUser) return [];
+  return data.children.filter((c) => c.teacher === currentUser.name);
+}
+
+function formatCurrency(n) {
+  return Number(n).toLocaleString('ko-KR') + '원';
+}
+
+// 금액 입력란: 항상 10원 단위로 반올림 + "1,000원" 형식으로 표시
+function parseMoneyInputValue(str) {
+  const digits = String(str).replace(/[^\d-]/g, '');
+  const n = Number(digits) || 0;
+  return Math.round(n / 10) * 10;
+}
+
+function formatMoneyInputValue(n) {
+  return formatCurrency(parseMoneyInputValue(n));
+}
+
+function attachMoneyInputFormatting(el) {
+  el.addEventListener('input', () => {
+    const digits = el.value.replace(/[^\d-]/g, '');
+    el.value = digits ? Number(digits).toLocaleString('ko-KR') + '원' : '';
+  });
+}
+
+function generateTimeOptions(stepMinutes = 10) {
+  const options = [];
+  for (let m = 0; m < 24 * 60; m += stepMinutes) {
+    const hh = String(Math.floor(m / 60)).padStart(2, '0');
+    const mm = String(m % 60).padStart(2, '0');
+    options.push(`${hh}:${mm}`);
+  }
+  return options;
+}
+
+function formatDateKR(date) {
+  const d = new Date(date);
+  const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
+  return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 (${weekdays[d.getDay()]}요일)`;
+}
+
+function getDayLabels(days) {
+  return days
+    .slice()
+    .sort((a, b) => a - b)
+    .map((d) => DAYS.find((day) => day.value === d)?.label)
+    .join(', ');
+}
+
+function getDayTimeLabel(child) {
+  return (child.days || [])
+    .slice()
+    .sort((a, b) => a - b)
+    .map((d) => {
+      const label = DAYS.find((day) => day.value === d)?.label;
+      const time = (child.dayTimes?.[d] || '').slice(0, 5);
+      return time ? `${label} ${time}` : label;
+    })
+    .join(', ');
+}
+
+// 대한민국 법정공휴일 — 수업 일수 자동 계산에서 제외한다.
+// 설날/추석/부처님오신날처럼 음력 기준이거나 대체공휴일이 붙는 날짜는 해마다 바뀌므로,
+// 새해가 되면 그 해 날짜를 여기에 추가해줘야 한다.
+const KR_HOLIDAYS = new Set([
+  // 2026년
+  '2026-01-01', // 신정
+  '2026-02-16', '2026-02-17', '2026-02-18', // 설날 연휴
+  '2026-03-02', // 삼일절 대체공휴일 (3/1이 일요일)
+  '2026-05-05', // 어린이날
+  '2026-05-25', // 부처님오신날 대체공휴일 (5/24가 일요일)
+  '2026-06-06', // 현충일
+  '2026-08-15', // 광복절
+  '2026-09-24', '2026-09-25', '2026-09-26', // 추석 연휴
+  '2026-10-03', // 개천절
+  '2026-10-09', // 한글날
+  '2026-12-25', // 성탄절
+]);
+
+function isKoreanHoliday(date) {
+  return KR_HOLIDAYS.has(dateKey(date));
+}
+
+function countSessionsInMonth(year, month, days) {
+  if (!days?.length) return 0;
+  const daySet = new Set(days);
+  const lastDay = new Date(year, month, 0).getDate();
+  let count = 0;
+  for (let d = 1; d <= lastDay; d++) {
+    const date = new Date(year, month - 1, d);
+    if (daySet.has(date.getDay()) && !isKoreanHoliday(date)) count++;
+  }
+  return count;
+}
+
+function getCopayAmount(child, sessionCount) {
+  let total = 0;
+  if (child.paymentTypes?.includes('developmental') && child.developmentalSub) {
+    total += getDevelopmentalCopay(child.subject, child.developmentalSub, sessionCount);
+  }
+  if (child.paymentTypes?.includes('infant') && child.infantSub) {
+    total += INFANT_SUBTYPES[child.infantSub]?.copay ?? 0;
+  }
+  return total;
+}
+
+function needsCopayField(child) {
+  return child.paymentTypes?.includes('developmental') || child.paymentTypes?.includes('infant');
+}
+
+/**
+ * 추가납부액 = 총 금액 − 발달바우처 지원금 − 발달바우처 본인부담금 − (교육청/스포츠 등 다른 바우처 차감액 합계)
+ * 발달바우처가 없으면 앞의 두 항은 0. 결과가 마이너스가 될 수 있으며 그대로 표시한다.
+ * 6·7회차 추가금은 이 계산식에 이미 포함되어 있어 별도로 더하지 않고, 안내용 항목으로만 표시한다.
+ */
+function calculateMonthlyFee(child, sessionCount) {
+  const subject = SUBJECTS[child.subject];
+  if (!subject) {
+    return { baseTotal: 0, voucherDeduction: 0, voucherDeductionLabels: [], voucherDeductionItems: [], extra6Amount: 0, extra7Amount: 0, extraAmount: 0, additionalPayment: 0, copay: 0, breakdown: [], rate: 0 };
+  }
+
+  const rate = subject.rate;
+  const baseTotal = sessionCount * rate;
+  const breakdown = [`총 금액: ${sessionCount}회 × ${formatCurrency(rate)} = ${formatCurrency(baseTotal)}`];
+
+  const types = child.paymentTypes || [];
+  const isDevelopmental = types.includes('developmental');
+
+  let developmentalDeduction = 0;
+  let developmentalCopay = 0;
+  let otherDeduction = 0;
+  let extra6Amount = 0;
+  let extra7Amount = 0;
+
+  if (isDevelopmental && child.developmentalSub) {
+    const sub = DEVELOPMENTAL_SUBTYPES[child.developmentalSub];
+    developmentalDeduction = getDevelopmentalVoucherDeduction(child.subject, child.developmentalSub, sessionCount);
+    developmentalCopay = getDevelopmentalCopay(child.subject, child.developmentalSub, sessionCount);
+    if (developmentalDeduction > 0) {
+      breakdown.push(`발달바우처 ${sub?.label ?? ''} 차감: -${formatCurrency(developmentalDeduction)}`);
+    }
+    if (sessionCount >= 6) {
+      extra6Amount = EXTRA_6TH[child.subject] ?? 0;
+      breakdown.push(`6회차 추가금: +${formatCurrency(extra6Amount)}`);
+    }
+    if (sessionCount >= 7) {
+      const extraSessions = sessionCount - 6;
+      extra7Amount = extraSessions * rate;
+      breakdown.push(`7회차 이후 ${extraSessions}회 × ${formatCurrency(rate)} = +${formatCurrency(extra7Amount)}`);
+    }
+  }
+
+  if (types.includes('edu-therapy')) {
+    otherDeduction += EDU_VOUCHER_AMOUNTS['edu-therapy'];
+    breakdown.push(`교육청 치료지원 차감: -${formatCurrency(EDU_VOUCHER_AMOUNTS['edu-therapy'])}`);
+  }
+  if (types.includes('edu-afterschool')) {
+    otherDeduction += EDU_VOUCHER_AMOUNTS['edu-afterschool'];
+    breakdown.push(`교육청 방과 후 차감: -${formatCurrency(EDU_VOUCHER_AMOUNTS['edu-afterschool'])}`);
+  }
+  if (types.includes('sports')) {
+    otherDeduction += SPORTS_VOUCHER_AMOUNT;
+    breakdown.push(`스포츠바우처 차감: -${formatCurrency(SPORTS_VOUCHER_AMOUNT)}`);
+  }
+
+  const extraAmount = extra6Amount + extra7Amount;
+  const voucherDeduction = developmentalDeduction + otherDeduction;
+  const copay = getCopayAmount(child, sessionCount);
+  const additionalPayment = baseTotal - developmentalDeduction - developmentalCopay - otherDeduction;
+
+  // "바우처 차감" 합계가 어떤 바우처들 때문인지 화면에 같이 보여주기 위한 라벨/개별 금액
+  const voucherDeductionLabels = [];
+  const voucherDeductionItems = [];
+  if (developmentalDeduction > 0) {
+    voucherDeductionLabels.push('발달재활');
+    voucherDeductionItems.push({ label: '발달재활', amount: developmentalDeduction });
+  }
+  if (types.includes('edu-therapy')) {
+    voucherDeductionLabels.push('치료지원');
+    voucherDeductionItems.push({ label: '치료지원', amount: EDU_VOUCHER_AMOUNTS['edu-therapy'] });
+  }
+  if (types.includes('edu-afterschool')) {
+    voucherDeductionLabels.push('방과 후');
+    voucherDeductionItems.push({ label: '방과 후', amount: EDU_VOUCHER_AMOUNTS['edu-afterschool'] });
+  }
+  if (types.includes('sports')) {
+    voucherDeductionLabels.push('스포츠');
+    voucherDeductionItems.push({ label: '스포츠', amount: SPORTS_VOUCHER_AMOUNT });
+  }
+
+  if (copay > 0) {
+    breakdown.push(`본인부담금 (별도 납부): ${formatCurrency(copay)}`);
+  }
+
+  breakdown.push(`→ 추가금 납부액: ${formatCurrency(additionalPayment)}`);
+
+  return { baseTotal, voucherDeduction, voucherDeductionLabels, voucherDeductionItems, extra6Amount, extra7Amount, extraAmount, additionalPayment, copay, breakdown, rate };
+}
+
+// 담당 과목이 아닌 "다른 과목"의 과목 키를 반환한다 (과목은 심리운동/언어재활 둘뿐이라 그냥 반대쪽을 찾음).
+function getOtherSubject(subjectKey) {
+  return Object.keys(SUBJECTS).find((k) => k !== subjectKey) || subjectKey;
+}
+
+// 다과목 결제(담당 과목 외 추가)가 필요한 달에만 월 수업료 산정 화면에서 켜서 쓰는 금액.
+// 요일/시간표가 따로 없어 자동 회차 계산이 불가능하므로, 매달 직접 입력한 횟수(extraSessionCount) ×
+// 그 과목 요율로만 계산한다 (바우처 차감 등은 적용하지 않음).
+function getExtraSubjectFee(child, feeRec) {
+  if (!feeRec?.extraSubjectEnabled) return 0;
+  const rate = SUBJECTS[getOtherSubject(child?.subject)]?.rate || 0;
+  return (feeRec?.extraSessionCount || 0) * rate;
+}
+
+// 이월 금액 차감은 추가납부액에서만 반영하고 본인부담금(copay)에는 영향을 주지 않는다.
+function getNetAdditionalPayment(fee, feeRec, child) {
+  return fee.additionalPayment - (feeRec?.carryoverAmount || 0) + getExtraSubjectFee(child, feeRec);
+}
+
+function dateKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function monthKey(year, month) {
+  return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+function esc(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function debounce(fn, delay = 600) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  };
+}
+
+function rowToChild(row) {
+  let dayTimes = row.day_times || null;
+  let days;
+  if (dayTimes && Object.keys(dayTimes).length) {
+    days = Object.keys(dayTimes).map(Number);
+  } else {
+    // 요일별 시간(day_times)이 없는 옛 데이터: days + 단일 class_time에서 변환
+    days = row.days || [];
+    dayTimes = {};
+    days.forEach((d) => { dayTimes[d] = row.class_time || '14:00'; });
+  }
+  // "15:00:00"(초 포함, DB time 타입)과 "15:00"(초 없음, <input type="time">)이
+  // 서로 다른 값으로 취급되지 않도록 항상 "HH:MM"으로 통일
+  Object.keys(dayTimes).forEach((d) => {
+    if (dayTimes[d]) dayTimes[d] = dayTimes[d].slice(0, 5);
+  });
+  return {
+    id: row.id,
+    name: row.name,
+    birthDate: row.birth_date || '',
+    teacher: row.teacher,
+    subject: row.subject,
+    paymentTypes: row.payment_types || [],
+    developmentalSub: row.developmental_sub || '',
+    infantSub: row.infant_sub || '',
+    days,
+    dayTimes,
+    createdAt: row.created_at || null,
+  };
+}
+
+function childToRow(child) {
+  const days = Object.keys(child.dayTimes || {}).map(Number);
+  return {
+    name: child.name,
+    birth_date: child.birthDate || null,
+    teacher: child.teacher,
+    subject: child.subject,
+    payment_types: child.paymentTypes,
+    developmental_sub: child.paymentTypes.includes('developmental') ? (child.developmentalSub || null) : null,
+    infant_sub: child.paymentTypes.includes('infant') ? (child.infantSub || null) : null,
+    days,
+    day_times: child.dayTimes || {},
+    class_time: days.length ? child.dayTimes[days[0]] : null,
+  };
+}
+
+let data = defaultData();
+let currentUser = getSession();
+let editingChildId = null;
+let feeViewYear = new Date().getFullYear();
+let feeViewMonth = new Date().getMonth() + 1;
+let attViewYear = new Date().getFullYear();
+let attViewMonth = new Date().getMonth() + 1;
+let historyChildId = null;
+let historyYear = new Date().getFullYear();
+let extraChildIdsByDate = {};
+let childrenSortMode = 'recent';
+let openTeacherGroups = new Set(); // 대상자 관리에서 펼쳐놓은 선생님 구역(기본은 다 접힘)
+let journalSelectedChildId = null;
+let attendanceViewDate = new Date();
+let feesIncludedIds = new Set(); // 기본값: 아무도 선택 안 됨 (필요한 친구만 직접 선택)
+
+const loadingScreen = document.getElementById('loadingScreen');
+const loginScreen = document.getElementById('loginScreen');
+const appScreen = document.getElementById('appScreen');
+const loginForm = document.getElementById('loginForm');
+const tabs = document.querySelectorAll('.tab');
+const panels = document.querySelectorAll('.panel');
+const childModal = document.getElementById('childModal');
+const childForm = document.getElementById('childForm');
+const childHistoryModal = document.getElementById('childHistoryModal');
+
+async function init() {
+  populateLoginSelect();
+  populateFormSelects();
+  renderDayTimeRows();
+  bindEvents();
+
+  try {
+    await loadAllData();
+  } catch (err) {
+    console.error(err);
+    alert('데이터를 불러오지 못했습니다. 인터넷 연결을 확인한 뒤 새로고침 해주세요.');
+  }
+
+  populateLoginSelect();
+  populateFormSelects();
+
+  loadingScreen.classList.add('hidden');
+
+  if (currentUser) {
+    showApp();
+  } else {
+    showLogin();
+  }
+}
+
+async function loadAllData() {
+  const [childrenRes, attendanceRes, feesRes, pwRes] = await Promise.all([
+    supabaseClient.from('children').select('*'),
+    supabaseClient.from('attendance').select('*'),
+    supabaseClient.from('monthly_fees').select('*'),
+    supabaseClient.from('teacher_passwords').select('*'),
+  ]);
+
+  const firstError = childrenRes.error || attendanceRes.error || feesRes.error || pwRes.error;
+  if (firstError) throw firstError;
+
+  data.children = (childrenRes.data || []).map(rowToChild);
+
+  data.attendance = {};
+  (attendanceRes.data || []).forEach((row) => {
+    if (!data.attendance[row.date]) data.attendance[row.date] = {};
+    data.attendance[row.date][row.child_id] = {
+      status: row.status,
+      reason: row.reason || '',
+      makeupTime: row.makeup_time || '',
+      count: row.count != null ? Number(row.count) : 1,
+      note: row.note || '',
+    };
+  });
+
+  data.monthlyFees = {};
+  (feesRes.data || []).forEach((row) => {
+    if (!data.monthlyFees[row.month_key]) data.monthlyFees[row.month_key] = {};
+    data.monthlyFees[row.month_key][row.child_id] = {
+      sessionCount: row.session_count,
+      additionalDepositDate: row.additional_deposit_date || '',
+      additionalAmount: row.additional_amount ?? null,
+      additionalPaid: row.additional_paid || false,
+      additionalPaymentMethod: row.additional_payment_method || '',
+      carryoverAmount: row.carryover_amount || 0,
+      extraSubjectEnabled: row.extra_subject_enabled || false,
+      extraSessionCount: row.extra_session_count || 0,
+      copayDepositDate: row.copay_deposit_date || '',
+      copayAmount: row.copay_amount ?? null,
+      copayPaid: row.copay_paid || false,
+      notes: row.notes || '',
+    };
+  });
+
+  data.teachers = (pwRes.data || []).map((row) => ({
+    name: row.teacher,
+    password: row.password,
+    isAdmin: row.is_admin || false,
+  }));
+}
+
+function showLogin() {
+  loginScreen.classList.remove('hidden');
+  appScreen.classList.add('hidden');
+}
+
+function showApp() {
+  loginScreen.classList.add('hidden');
+  appScreen.classList.remove('hidden');
+  document.getElementById('userLabel').textContent =
+    `${currentUser.name}${isAdmin() ? ' (관리자)' : ''}`;
+  document.getElementById('tabSettings').classList.toggle('hidden', !isAdmin());
+  renderAll();
+}
+
+function populateLoginSelect() {
+  const sel = document.getElementById('loginUsername');
+  sel.innerHTML = '<option value="">선택</option>';
+  data.teachers.forEach((t) => {
+    sel.innerHTML += `<option value="${esc(t.name)}">${esc(t.name)}</option>`;
+  });
+}
+
+function populateFormSelects() {
+  const teacherSel = document.getElementById('teacherSelect');
+  teacherSel.innerHTML = '<option value="">선택</option>';
+  data.teachers.forEach((t) => {
+    teacherSel.innerHTML += `<option value="${esc(t.name)}">${esc(t.name)}</option>`;
+  });
+}
+
+// 신승오 선생님은 심리운동, 그 외 선생님은 언어재활만 담당하므로 과목 목록을 담당 선생님에 따라 다르게 보여준다.
+function getSubjectsForTeacher(teacherName) {
+  return teacherName === '신승오'
+    ? { psychomotor: SUBJECTS.psychomotor }
+    : { language: SUBJECTS.language };
+}
+
+function populateSubjectSelect(teacherName) {
+  const subjectSel = childForm.querySelector('[name="subject"]');
+  const current = subjectSel.value;
+  const options = getSubjectsForTeacher(teacherName);
+  const keys = Object.keys(options);
+  subjectSel.innerHTML =
+    '<option value="">선택</option>' +
+    Object.entries(options).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('');
+  if (options[current]) subjectSel.value = current;
+
+  // 선생님별로 과목이 하나뿐이므로 담당 선생님 칸처럼 자동 선택 후 고정한다.
+  if (keys.length === 1) {
+    subjectSel.value = keys[0];
+    subjectSel.disabled = true;
+  } else {
+    subjectSel.disabled = false;
+  }
+}
+
+function renderDayTimeRows(container = document.getElementById('dayTimeRows'), dayTimes = {}) {
+  const scheduleDays = DAYS.slice(1); // 월~토 (일요일 제외)
+  const baseOptions = generateTimeOptions(10);
+  container.innerHTML = scheduleDays
+    .map((d) => {
+      const checked = dayTimes[d.value] !== undefined;
+      const time = dayTimes[d.value] || '14:00';
+      // 10분 단위가 아닌 옛 시간값도 목록에 끼워 넣어 수정 시 값이 사라지지 않게 함
+      const options = baseOptions.includes(time) ? baseOptions : [...baseOptions, time].sort();
+      const optionsHtml = options.map((t) => `<option value="${t}" ${t === time ? 'selected' : ''}>${t}</option>`).join('');
+      return `
+      <div class="day-time-row">
+        <label class="day-check">
+          <input type="checkbox" class="day-time-checkbox" data-day="${d.value}" ${checked ? 'checked' : ''}>
+          ${d.label}
+        </label>
+        <select class="day-time-input" data-day="${d.value}" ${checked ? '' : 'disabled'}>${optionsHtml}</select>
+      </div>`;
+    })
+    .join('');
+}
+
+function renderPaymentTypeCheckboxes(container = document.getElementById('paymentTypeCheckboxes'), selected = []) {
+  container.innerHTML = PAYMENT_TYPE_OPTIONS.map(
+    (key) => `
+    <label class="day-check">
+      <input type="checkbox" name="paymentTypes" value="${key}" ${selected.includes(key) ? 'checked' : ''}>
+      ${PAYMENT_TYPES[key]}
+    </label>`
+  ).join('');
+}
+
+function bindEvents() {
+  loginForm.addEventListener('submit', handleLogin);
+  document.getElementById('btnLogout').addEventListener('click', handleLogout);
+  document.getElementById('btnAddTeacher').addEventListener('click', handleAddTeacher);
+
+  document.getElementById('attDatePrev').addEventListener('click', () => {
+    attendanceViewDate = new Date(attendanceViewDate);
+    attendanceViewDate.setDate(attendanceViewDate.getDate() - 1);
+    renderAttendance();
+  });
+  document.getElementById('attDateNext').addEventListener('click', () => {
+    attendanceViewDate = new Date(attendanceViewDate);
+    attendanceViewDate.setDate(attendanceViewDate.getDate() + 1);
+    renderAttendance();
+  });
+  document.getElementById('attDateToday').addEventListener('click', () => {
+    attendanceViewDate = new Date();
+    renderAttendance();
+  });
+
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+  });
+
+  document.getElementById('btnNewChild').addEventListener('click', () => openChildModal());
+  document.getElementById('teacherSelect').addEventListener('change', (e) => {
+    populateSubjectSelect(e.target.value);
+  });
+  document.getElementById('childrenSortSelect').addEventListener('change', (e) => {
+    childrenSortMode = e.target.value;
+    renderChildren();
+  });
+
+  document.getElementById('btnFeesSelectAll').addEventListener('click', () => {
+    feesIncludedIds = new Set(getVisibleChildren().map((c) => c.id));
+    renderFees();
+  });
+  document.getElementById('btnFeesSelectNone').addEventListener('click', () => {
+    feesIncludedIds.clear();
+    renderFees();
+  });
+
+  document.getElementById('closeModal').addEventListener('click', closeChildModal);
+  document.getElementById('cancelModal').addEventListener('click', closeChildModal);
+  childForm.addEventListener('submit', handleChildSubmit);
+
+  document.getElementById('paymentTypeCheckboxes').addEventListener('change', (e) => {
+    if (e.target.name !== 'paymentTypes') return;
+    if (e.target.value === 'developmental' && !e.target.checked) {
+      childForm.querySelectorAll('[name="developmentalSub"]').forEach((r) => { r.checked = false; });
+    }
+    if (e.target.value === 'infant' && !e.target.checked) {
+      childForm.querySelectorAll('[name="infantSub"]').forEach((r) => { r.checked = false; });
+    }
+    updateVoucherSubFields();
+  });
+
+  document.getElementById('dayTimeRows').addEventListener('change', (e) => {
+    if (!e.target.classList.contains('day-time-checkbox')) return;
+    const row = e.target.closest('.day-time-row');
+    const timeInput = row.querySelector('.day-time-input');
+    timeInput.disabled = !e.target.checked;
+  });
+
+  document.getElementById('prevMonth').addEventListener('click', () => {
+    feeViewMonth--;
+    if (feeViewMonth < 1) { feeViewMonth = 12; feeViewYear--; }
+    renderFees();
+  });
+  document.getElementById('nextMonth').addEventListener('click', () => {
+    feeViewMonth++;
+    if (feeViewMonth > 12) { feeViewMonth = 1; feeViewYear++; }
+    renderFees();
+  });
+
+  document.getElementById('attPrevMonth').addEventListener('click', () => {
+    attViewMonth--;
+    if (attViewMonth < 1) { attViewMonth = 12; attViewYear--; }
+    renderMonthlyAttendance();
+  });
+  document.getElementById('attNextMonth').addEventListener('click', () => {
+    attViewMonth++;
+    if (attViewMonth > 12) { attViewMonth = 1; attViewYear++; }
+    renderMonthlyAttendance();
+  });
+
+  document.getElementById('btnPrintAttendance').addEventListener('click', () => {
+    document.getElementById('attPrintTitle').textContent = getAttendanceReportTitle();
+    setPrintPageSize('landscape');
+    window.print();
+  });
+  document.getElementById('btnExportAttendanceExcel').addEventListener('click', exportMonthlyAttendanceExcel);
+
+  document.getElementById('btnPrintSchedule').addEventListener('click', printScheduleFitToPage);
+  document.getElementById('btnExportScheduleExcel').addEventListener('click', exportScheduleExcel);
+
+  document.getElementById('closeHistoryModal').addEventListener('click', closeChildHistoryModal);
+  document.getElementById('closeHistoryModalFooter').addEventListener('click', closeChildHistoryModal);
+  document.getElementById('historyPrevYear').addEventListener('click', () => {
+    historyYear--;
+    renderChildHistory();
+  });
+  document.getElementById('historyNextYear').addEventListener('click', () => {
+    historyYear++;
+    renderChildHistory();
+  });
+}
+
+function openChildHistoryModal(childId) {
+  historyChildId = childId;
+  historyYear = new Date().getFullYear();
+  renderChildHistory();
+  childHistoryModal.showModal();
+}
+
+function closeChildHistoryModal() {
+  childHistoryModal.close();
+  historyChildId = null;
+}
+
+function getMonthlyFeeAmounts(childId, year, month) {
+  const child = data.children.find((c) => c.id === childId);
+  if (!child) return { additional: 0, copay: 0 };
+  const mk = monthKey(year, month);
+  const rec = data.monthlyFees[mk]?.[childId];
+  const sessionCount = rec?.sessionCount ?? countSessionsInMonth(year, month, child.days);
+  const fee = calculateMonthlyFee(child, sessionCount);
+  const additional = rec?.additionalAmount ?? getNetAdditionalPayment(fee, rec, child);
+  const copay = rec?.copayAmount ?? fee.copay;
+  return { additional, copay };
+}
+
+function renderChildHistory() {
+  const child = data.children.find((c) => c.id === historyChildId);
+  if (!child) return;
+
+  document.getElementById('historyModalTitle').textContent = `${child.name} 납부 내역`;
+  document.getElementById('historyYearLabel').textContent = `${historyYear}년`;
+
+  let totalAdditional = 0;
+  let totalCopay = 0;
+
+  const rows = Array.from({ length: 12 }, (_, i) => i + 1)
+    .map((m) => {
+      const { additional, copay } = getMonthlyFeeAmounts(historyChildId, historyYear, m);
+      totalAdditional += additional;
+      totalCopay += copay;
+      return `
+        <tr>
+          <td>${m}월</td>
+          <td class="amount">${formatCurrency(additional)}</td>
+          <td class="amount">${formatCurrency(copay)}</td>
+          <td class="amount">${formatCurrency(additional + copay)}</td>
+        </tr>`;
+    })
+    .join('');
+
+  document.getElementById('historyTableWrap').innerHTML = `
+    <div class="payment-table-wrap">
+      <table class="payment-table">
+        <thead><tr><th>월</th><th>추가금</th><th>본인부담금</th><th>합계</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot>
+          <tr class="history-total-row">
+            <td>합계</td>
+            <td class="amount">${formatCurrency(totalAdditional)}</td>
+            <td class="amount">${formatCurrency(totalCopay)}</td>
+            <td class="amount">${formatCurrency(totalAdditional + totalCopay)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>`;
+}
+
+function setPrintPageSize(orientation) {
+  let styleEl = document.getElementById('dynamicPrintPageStyle');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'dynamicPrintPageStyle';
+    document.head.appendChild(styleEl);
+  }
+  styleEl.textContent = `@page { size: A4 ${orientation}; margin: 10mm; }`;
+}
+
+const PRINT_MM_TO_PX = 96 / 25.4;
+const PRINT_MARGIN_MM = 10;
+
+// 현재 문서에 이미 로드되어 있는 style.css의 실제 규칙 텍스트를 그대로 가져온다.
+// (인쇄 팝업에서 <link>로 다시 불러오면 네트워크 로딩이 끝나기 전에 크기를 측정해버려
+//  축소 비율이 틀어지는 문제가 있었음 — 이미 로드된 내용을 그대로 인라인하면 그 문제가 없다.)
+function getMainStylesheetText() {
+  for (const sheet of document.styleSheets) {
+    try {
+      if (sheet.href && sheet.href.includes('style.css')) {
+        return [...sheet.cssRules].map((r) => r.cssText).join('\n');
+      }
+    } catch (e) {
+      // 접근 불가한(교차 출처) 스타일시트는 건너뜀
+    }
+  }
+  return '';
+}
+
+// 시간표는 인쇄할 때 메인 화면의 다른 탭/헤더와 얽히지 않도록 별도의 인쇄 전용 창을 띄워
+// 그 창 안에서만 A4 세로 1장에 맞춰 축소 + 가운데 정렬한 뒤 인쇄한다.
+//
+// 축소/측정 스크립트를 여는 쪽(opener)이 아니라 새 창 자신의 <script>로 실행한다.
+// opener 쪽에서 다른 창의 스타일을 조작한 직후 곧바로 print()를 호출하면, 브라우저가
+// 그 변경 사항을 인쇄용으로 확정(commit)하기 전에 인쇄 스냅샷을 떠버리는 경우가 있어
+// (그러면 축소 계산은 맞는데도 실제 인쇄물엔 반영 전 크기로 나가 페이지가 넘어감),
+// 새 창이 스스로 로드→레이아웃 확정까지 기다렸다가 스스로 축소하고 스스로 인쇄하게 한다.
+function printScheduleFitToPage() {
+  const tableWrap = document.getElementById('scheduleTableWrap');
+  if (!tableWrap) return;
+  const title = `${currentUser?.name || ''} 시간표 (월~토)`;
+  const cssText = getMainStylesheetText();
+
+  const win = window.open('', '_blank');
+  if (!win) {
+    alert('인쇄 창을 열 수 없습니다. 팝업 차단을 해제한 뒤 다시 시도해주세요.');
+    return;
+  }
+
+  const printMarginMm = 4;
+  // 브라우저 인쇄 창이 CSS @page 방향을 자동으로 따라가지 않는 경우가 있어(실제로 세로로 인쇄됨),
+  // 항상 세로로 인쇄된다고 가정하고 계산한다. (A4 세로: 210mm x 297mm)
+  // 실제 브라우저/프린터가 @page margin을 우리 계산과 완전히 똑같이 처리하지 않을 수 있어(예: 최소
+  // 여백을 강제로 더 크게 잡는 경우), 계산한 크기보다 살짝 더 작게 잡아야 그 오차만큼 빈 2페이지가
+  // 추가로 인쇄되는 사고를 막을 수 있다.
+  const PAGE_SAFETY_PX = 4;
+  const pageWpx = (210 - printMarginMm * 2) * PRINT_MM_TO_PX - PAGE_SAFETY_PX;
+  const pageHpxBase = (297 - printMarginMm * 2) * PRINT_MM_TO_PX - PAGE_SAFETY_PX;
+
+  win.document.open();
+  win.document.write(`<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>${esc(title)}</title>
+<style>
+${cssText}
+@page { size: A4 portrait; margin: ${printMarginMm}mm; }
+html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+body { display: flex; align-items: center; justify-content: center; }
+#schedulePrintArea { position: static !important; width: auto !important; display: flex !important; flex-direction: column; align-items: center; }
+#schedulePrintTitle { display: block !important; text-align: center; margin: 0 0 .5rem; }
+/* overflow:hidden + 고정 크기 = 이 상자는 물리적으로 절대 페이지를 넘어갈 수 없다(브라우저 구현에 관계없이 항상 동일하게 동작하는 가장 기본적인 CSS 동작) */
+#scheduleScaleWrap { overflow: hidden; }
+/* 요일 칸 너비를 동일하게 맞추고 글씨를 키우며, 표가 인쇄 영역 세로를 최대한 채우도록 함 */
+#scheduleTableWrap .payment-table-wrap { width: 100%; height: 100%; }
+#scheduleTableWrap .schedule-table {
+  table-layout: fixed;
+  width: 100%;
+  height: 100%;
+  font-size: .8rem;
+}
+#scheduleTableWrap .schedule-table th,
+#scheduleTableWrap .schedule-table td {
+  vertical-align: middle;
+  overflow: hidden;
+}
+#scheduleTableWrap .schedule-table thead th {
+  font-size: .76rem;
+}
+#scheduleTableWrap .schedule-table tbody th {
+  font-size: .68rem;
+  white-space: normal;
+  word-break: keep-all;
+}
+#scheduleTableWrap .schedule-table th:first-child,
+#scheduleTableWrap .schedule-table td:first-child {
+  width: 14%;
+}
+#scheduleTableWrap .schedule-table th:not(:first-child),
+#scheduleTableWrap .schedule-table td:not(:first-child) {
+  width: calc((100% - 14%) / 6);
+}
+/* 칸이 고정 너비라 이름/바우처 태그가 옆으로 넘치지 않도록 칸 안에서 줄바꿈되게 함.
+   overflow-wrap:break-word는 음절(글자) 중간에서도 강제로 끊어버릴 수 있어,
+   글자 단위는 유지하고(word-break:keep-all) 정 안 들어가면 칸이 잘라내도록(overflow:hidden, 위에서 지정) 한다. */
+#scheduleTableWrap .schedule-child,
+#scheduleTableWrap .voucher-tag {
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+#scheduleTableWrap .schedule-child {
+  align-items: center;
+}
+#scheduleTableWrap .schedule-meta {
+  justify-content: center;
+  font-size: .6rem;
+}
+#scheduleTableWrap .schedule-cell-grid {
+  min-width: 0;
+}
+#scheduleTableWrap .schedule-cell-grid.two-col {
+  grid-template-columns: 1fr 1fr;
+}
+#scheduleTableWrap .schedule-cell-grid .schedule-child {
+  min-width: 0;
+}
+</style>
+</head>
+<body>
+  <div id="schedulePrintArea">
+    <h3 id="schedulePrintTitle">${esc(title)}</h3>
+    <div id="scheduleScaleWrap"><div id="scheduleTableWrap">${tableWrap.innerHTML}</div></div>
+  </div>
+  <script>
+  (function () {
+    var wrap = document.getElementById('scheduleScaleWrap');
+    var content = document.getElementById('scheduleTableWrap');
+    var table = document.querySelector('#scheduleTableWrap .schedule-table');
+    var titleEl = document.getElementById('schedulePrintTitle');
+    var pageWpx = ${pageWpx};
+    var pageHpxBase = ${pageHpxBase};
+
+    function fit() {
+      content.style.transform = 'none';
+      var titleHeight = titleEl ? (titleEl.offsetHeight + 8) : 0;
+      var pageHpx = pageHpxBase - titleHeight;
+
+      // 1) 바깥 상자를 페이지 크기에 딱 맞춰 고정한다. overflow:hidden이라
+      //    이 크기를 절대 넘어갈 수 없다 (계산이 조금 어긋나도 페이지가 넘어가는 사고 자체가 불가능).
+      wrap.style.width = pageWpx + 'px';
+      wrap.style.height = pageHpx + 'px';
+
+      // 2) 표 자체를 그 상자에 맞춰 채운다 (내용이 적으면 행이 늘어나 빈 공간을 채움).
+      content.style.width = '100%';
+      content.style.height = '100%';
+
+      // 3) 그래도 내용이 많아 넘치면 화면에 보이는 크기만 축소한다.
+      //    (transform은 레이아웃 크기에 영향을 주지 않는 순수 시각 효과이므로,
+      //     바깥 상자가 이미 1)에서 고정+클리핑되어 있어 페이지 초과는 구조적으로 불가능하다.)
+      var rect = table.getBoundingClientRect();
+      var scale = Math.min(1, pageWpx / rect.width, pageHpx / rect.height);
+      if (scale < 1) {
+        content.style.transformOrigin = 'top left';
+        content.style.transform = 'scale(' + scale + ')';
+      }
+    }
+
+    var done = false;
+    function run() {
+      if (done) return;
+      done = true;
+      fit();
+      window.focus();
+      window.print();
+    }
+    // 레이아웃이 실제로 확정된 뒤에 측정/인쇄하도록 프레임을 두 번 넘겨 기다리되,
+    // 혹시 프레임 이벤트가 발생하지 않는 환경을 대비해 타임아웃도 함께 건다.
+    window.requestAnimationFrame(function () {
+      window.requestAnimationFrame(run);
+    });
+    setTimeout(run, 300);
+    window.addEventListener('afterprint', function () { window.close(); });
+  })();
+  <\/script>
+</body>
+</html>`);
+  win.document.close();
+}
+
+function getAttendanceReportTitle() {
+  const mm = String(attViewMonth).padStart(2, '0');
+  return `${attViewYear}년 ${mm}월 출석부-${currentUser?.name || ''}`;
+}
+
+function exportMonthlyAttendanceExcel() {
+  const { rows, dateList, grandTotal } = computeMonthlyAttendanceData(attViewYear, attViewMonth);
+  if (!rows.length) return;
+
+  const title = getAttendanceReportTitle();
+  const totalCols = dateList.length + 1;
+
+  const aoa = [];
+  aoa.push([title, ...Array(dateList.length).fill('')]);
+  aoa.push(['이름', ...dateList]);
+  aoa.push(['', ...dateList.map((d) => WEEKDAY_LABELS[new Date(attViewYear, attViewMonth - 1, d).getDay()])]);
+
+  rows.forEach(({ child: c, presentCount, cells, paymentStatus }) => {
+    const rowVals = cells.map((cell) => {
+      if (cell.type === 'noclass') return '';
+      if (cell.type === 'empty') return '-';
+      const makeupSuffix = cell.isMakeup ? '(보강)' : '';
+      if (cell.type === 'present') return `출석${makeupSuffix}`;
+      return (cell.reason ? `결석(${cell.reason})` : '결석') + makeupSuffix;
+    });
+    const statusText = paymentStatus === 'unpaid' ? ' - 미납' : paymentStatus === 'paid' ? ' - 납부완료' : '';
+    aoa.push([`${c.name} (${presentCount}회)${statusText}`, ...rowVals]);
+  });
+
+  aoa.push([`합계 (${grandTotal}회)`, ...Array(dateList.length).fill('')]);
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const headerRowIdx = [1, 2];
+  const totalRowIdx = aoa.length - 1;
+
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } }];
+  ws['!cols'] = [{ wch: 16 }, ...dateList.map(() => ({ wch: 6 }))];
+
+  const thinBorder = { style: 'thin', color: { rgb: '000000' } };
+  const border = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };
+
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      if (!ws[addr]) ws[addr] = { t: 's', v: '' };
+      const isTitle = r === 0;
+      const isHeader = headerRowIdx.includes(r);
+      const isTotal = r === totalRowIdx;
+      ws[addr].s = {
+        border,
+        alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+        font: { bold: isTitle || isHeader || isTotal, sz: isTitle ? 13 : 11 },
+        fill: isHeader ? { fgColor: { rgb: 'F1F5F9' } } : isTotal ? { fgColor: { rgb: 'FEF3C7' } } : undefined,
+      };
+    }
+  }
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '출석부');
+  XLSX.writeFile(wb, `${title}.xlsx`);
+}
+
+function handleLogin(e) {
+  e.preventDefault();
+  const fd = new FormData(loginForm);
+  const username = fd.get('username');
+  const password = fd.get('password');
+
+  const teacher = data.teachers.find((t) => t.name === username);
+  if (!teacher) {
+    alert('등록되지 않은 선생님입니다.');
+    return;
+  }
+
+  if (password !== teacher.password) {
+    alert('비밀번호가 올바르지 않습니다.');
+    return;
+  }
+
+  currentUser = { name: username };
+  setSession(currentUser);
+  showApp();
+}
+
+function handleLogout() {
+  currentUser = null;
+  clearSession();
+  loginForm.reset();
+  showLogin();
+}
+
+async function handleAddTeacher() {
+  const nameInput = document.getElementById('newTeacherName');
+  const adminCheckbox = document.getElementById('newTeacherIsAdmin');
+  const name = nameInput.value.trim();
+
+  if (!name) {
+    alert('선생님 이름을 입력해 주세요.');
+    return;
+  }
+  if (data.teachers.some((t) => t.name === name)) {
+    alert('이미 등록된 이름입니다.');
+    return;
+  }
+
+  const isAdminChecked = adminCheckbox.checked;
+  const btn = document.getElementById('btnAddTeacher');
+  btn.disabled = true;
+  const { error } = await supabaseClient
+    .from('teacher_passwords')
+    .insert({ teacher: name, password: DEFAULT_PASSWORD, is_admin: isAdminChecked });
+  btn.disabled = false;
+
+  if (error) {
+    console.error(error);
+    alert('추가 중 오류가 발생했습니다.');
+    return;
+  }
+
+  data.teachers.push({ name, password: DEFAULT_PASSWORD, isAdmin: isAdminChecked });
+  nameInput.value = '';
+  adminCheckbox.checked = false;
+  populateLoginSelect();
+  populateFormSelects();
+  renderPasswordSettings();
+}
+
+function switchTab(name) {
+  tabs.forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
+  panels.forEach((p) => p.classList.toggle('active', p.id === name));
+  if (name === 'attendance') renderAttendance();
+  if (name === 'schedule') renderSchedule();
+  if (name === 'children') renderChildren();
+  if (name === 'fees') renderFees();
+  if (name === 'monthlyAttendance') renderMonthlyAttendance();
+  if (name === 'journal') renderJournal();
+  if (name === 'settings') renderPasswordSettings();
+}
+
+function renderAll() {
+  renderAttendance();
+  renderSchedule();
+  renderChildren();
+  renderFees();
+  renderMonthlyAttendance();
+  renderJournal();
+  if (isAdmin()) renderPasswordSettings();
+}
+
+function updateVoucherSubFields() {
+  const checkedTypes = [...childForm.querySelectorAll('[name="paymentTypes"]:checked')].map((el) => el.value);
+
+  const devField = document.getElementById('developmentalSubField');
+  const devOptions = document.getElementById('developmentalSubOptions');
+  if (checkedTypes.includes('developmental')) {
+    const current = childForm.querySelector('[name="developmentalSub"]:checked')?.value;
+    devField.hidden = false;
+    devOptions.innerHTML = renderRadioGroup('developmentalSub', DEVELOPMENTAL_SUBTYPES, current, true);
+  } else {
+    devField.hidden = true;
+    devOptions.innerHTML = '';
+  }
+
+  const infField = document.getElementById('infantSubField');
+  const infOptions = document.getElementById('infantSubOptions');
+  if (checkedTypes.includes('infant')) {
+    const current = childForm.querySelector('[name="infantSub"]:checked')?.value;
+    infField.hidden = false;
+    infOptions.innerHTML = renderRadioGroup('infantSub', INFANT_SUBTYPES, current, true);
+  } else {
+    infField.hidden = true;
+    infOptions.innerHTML = '';
+  }
+}
+
+function renderRadioGroup(name, subtypes, selected, showCopay) {
+  return Object.entries(subtypes)
+    .map(
+      ([k, v]) => `
+      <label class="radio-option">
+        <input type="radio" name="${name}" value="${k}" ${selected === k ? 'checked' : ''}>
+        ${v.label}${showCopay && v.copay !== undefined ? ` (${formatCurrency(v.copay)})` : ''}
+      </label>`
+    )
+    .join('');
+}
+
+function openChildModal(child = null) {
+  editingChildId = child?.id ?? null;
+  document.getElementById('modalTitle').textContent = child ? '대상자 정보 수정' : '새 대상자 등록';
+  childForm.reset();
+
+  const teacherSel = document.getElementById('teacherSelect');
+  if (child) {
+    childForm.querySelector('[name="name"]').value = child.name;
+    childForm.querySelector('[name="birthDate"]').value = child.birthDate || '';
+    teacherSel.value = child.teacher;
+    populateSubjectSelect(child.teacher);
+    childForm.querySelector('[name="subject"]').value = child.subject;
+    renderPaymentTypeCheckboxes(document.getElementById('paymentTypeCheckboxes'), child.paymentTypes || []);
+    renderDayTimeRows(document.getElementById('dayTimeRows'), child.dayTimes || {});
+    if (!isAdmin()) {
+      teacherSel.value = currentUser.name;
+    }
+    teacherSel.disabled = !isAdmin();
+  } else {
+    renderPaymentTypeCheckboxes(document.getElementById('paymentTypeCheckboxes'), []);
+    renderDayTimeRows(document.getElementById('dayTimeRows'), {});
+    // 새 대상자 등록 시 담당 선생님은 항상 로그인한 본인으로 고정한다.
+    teacherSel.value = currentUser.name;
+    populateSubjectSelect(currentUser.name);
+    teacherSel.disabled = true;
+  }
+
+  updateVoucherSubFields();
+  if (child?.developmentalSub) {
+    const radio = childForm.querySelector(`[name="developmentalSub"][value="${child.developmentalSub}"]`);
+    if (radio) radio.checked = true;
+  }
+  if (child?.infantSub) {
+    const radio = childForm.querySelector(`[name="infantSub"][value="${child.infantSub}"]`);
+    if (radio) radio.checked = true;
+  }
+  childModal.showModal();
+}
+
+function closeChildModal() {
+  childModal.close();
+  editingChildId = null;
+  document.getElementById('teacherSelect').disabled = false;
+}
+
+async function handleChildSubmit(e) {
+  e.preventDefault();
+  const fd = new FormData(childForm);
+  const dayTimes = {};
+  childForm.querySelectorAll('.day-time-checkbox:checked').forEach((cb) => {
+    const day = Number(cb.dataset.day);
+    const timeInput = childForm.querySelector(`.day-time-input[data-day="${day}"]`);
+    dayTimes[day] = timeInput.value || '14:00';
+  });
+
+  if (!Object.keys(dayTimes).length) {
+    alert('수업 요일을 하나 이상 선택해 주세요.');
+    return;
+  }
+
+  const paymentTypes = [...childForm.querySelectorAll('[name="paymentTypes"]:checked')].map((el) => el.value);
+  const developmentalSub = fd.get('developmentalSub') || '';
+  const infantSub = fd.get('infantSub') || '';
+
+  if (paymentTypes.includes('developmental') && !developmentalSub) {
+    alert('발달바우처 형별을 선택해 주세요.');
+    return;
+  }
+  if (paymentTypes.includes('infant') && !infantSub) {
+    alert('영유아 바우처 등급을 선택해 주세요.');
+    return;
+  }
+
+  // teacherSelect가 잠겨 있으면(신규 등록 전체 / 비관리자 수정) FormData에 값이 실리지 않으므로 본인으로 대체한다.
+  let teacher = fd.get('teacher') || currentUser.name;
+
+  const child = {
+    name: fd.get('name').trim(),
+    birthDate: fd.get('birthDate') || '',
+    teacher,
+    // 과목 select가 잠겨 있으면(선택지가 하나뿐) FormData에 값이 실리지 않으므로 DOM 값을 직접 읽는다.
+    subject: fd.get('subject') || childForm.querySelector('[name="subject"]').value,
+    paymentTypes,
+    developmentalSub: paymentTypes.includes('developmental') ? developmentalSub : '',
+    infantSub: paymentTypes.includes('infant') ? infantSub : '',
+    dayTimes,
+    days: Object.keys(dayTimes).map(Number),
+  };
+
+  const submitBtn = childForm.querySelector('.modal-footer .btn-primary');
+  submitBtn.disabled = true;
+
+  try {
+    if (editingChildId) {
+      const existing = data.children.find((c) => c.id === editingChildId);
+      if (existing && !isAdmin() && existing.teacher !== currentUser.name) {
+        alert('수정 권한이 없습니다.');
+        return;
+      }
+      const { error } = await supabaseClient
+        .from('children')
+        .update(childToRow(child))
+        .eq('id', editingChildId);
+      if (error) throw error;
+
+      const idx = data.children.findIndex((c) => c.id === editingChildId);
+      if (idx >= 0) data.children[idx] = { ...child, id: editingChildId };
+    } else {
+      const { data: inserted, error } = await supabaseClient
+        .from('children')
+        .insert(childToRow(child))
+        .select()
+        .single();
+      if (error) throw error;
+      data.children.push(rowToChild(inserted));
+    }
+
+    closeChildModal();
+    renderChildren();
+    renderAttendance();
+    renderFees();
+  } catch (err) {
+    console.error(err);
+    alert('저장 중 오류가 발생했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+  } finally {
+    submitBtn.disabled = false;
+  }
+}
+
+async function deleteChild(id) {
+  const child = data.children.find((c) => c.id === id);
+  if (!child) return;
+  if (!isAdmin() && child.teacher !== currentUser.name) {
+    alert('삭제 권한이 없습니다.');
+    return;
+  }
+  if (!confirm('이 대상자 정보를 삭제할까요?')) return;
+
+  const { error } = await supabaseClient.from('children').delete().eq('id', id);
+  if (error) {
+    console.error(error);
+    alert('삭제 중 오류가 발생했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+    return;
+  }
+
+  data.children = data.children.filter((c) => c.id !== id);
+  renderChildren();
+  renderAttendance();
+  renderFees();
+}
+
+function sortChildren(children) {
+  const sorted = children.slice();
+  if (childrenSortMode === 'name') {
+    sorted.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  } else {
+    sorted.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }
+  return sorted;
+}
+
+function renderChildCard(c) {
+  const paymentLabel = c.paymentTypes?.length
+    ? c.paymentTypes.map((t) => PAYMENT_TYPES[t] || t).join(' + ')
+    : PAYMENT_TYPES.none;
+  const subLabels = [];
+  if (c.paymentTypes?.includes('developmental') && c.developmentalSub) {
+    subLabels.push(DEVELOPMENTAL_SUBTYPES[c.developmentalSub]?.label);
+  }
+  if (c.paymentTypes?.includes('infant') && c.infantSub) {
+    subLabels.push(INFANT_SUBTYPES[c.infantSub]?.label);
+  }
+  const voucherLabel = subLabels.length ? ` · ${subLabels.join(', ')}` : '';
+  return `
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="child-name child-name-link" data-history="${c.id}">${esc(c.name)}</div>
+        <div class="child-meta">
+          ${c.birthDate ? `${esc(c.birthDate)} (${getAgeString(c.birthDate)}) · ` : ''}
+          ${getDayTimeLabel(c)} ·
+          ${esc(c.teacher)} · ${SUBJECTS[c.subject]?.label}
+        </div>
+        <div class="child-meta">${paymentLabel}${voucherLabel}</div>
+      </div>
+      <div class="card-actions">
+        <button class="btn btn-sm" data-edit="${c.id}">수정</button>
+        <button class="btn btn-sm btn-danger" data-delete="${c.id}">삭제</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderChildren() {
+  const list = document.getElementById('childrenList');
+  const visible = getVisibleChildren();
+
+  if (!visible.length) {
+    list.innerHTML = '<p class="empty-msg">등록된 대상자가 없습니다. 새 대상자를 등록해 주세요.</p>';
+    return;
+  }
+
+  if (isAdmin()) {
+    // 관리자는 선생님별로 묶어서 보여준다 (기본은 접힌 상태, 클릭하면 펼침).
+    const teacherNames = [...new Set(visible.map((c) => c.teacher))].sort((a, b) => a.localeCompare(b, 'ko'));
+    list.innerHTML = teacherNames
+      .map((teacherName) => {
+        const kids = sortChildren(visible.filter((c) => c.teacher === teacherName));
+        const isOpen = openTeacherGroups.has(teacherName);
+        return `
+        <details class="children-teacher-group" data-teacher-group="${esc(teacherName)}" ${isOpen ? 'open' : ''}>
+          <summary class="children-teacher-group-label">${esc(teacherName)} <span class="children-teacher-count">(${kids.length}명)</span></summary>
+          <div class="children-teacher-group-cards">${kids.map(renderChildCard).join('')}</div>
+        </details>`;
+      })
+      .join('');
+    list.querySelectorAll('[data-teacher-group]').forEach((el) => {
+      el.addEventListener('toggle', () => {
+        if (el.open) openTeacherGroups.add(el.dataset.teacherGroup);
+        else openTeacherGroups.delete(el.dataset.teacherGroup);
+      });
+    });
+  } else {
+    list.innerHTML = sortChildren(visible).map(renderChildCard).join('');
+  }
+
+  list.querySelectorAll('[data-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const child = data.children.find((c) => c.id === btn.dataset.edit);
+      if (child) openChildModal(child);
+    });
+  });
+  list.querySelectorAll('[data-delete]').forEach((btn) => {
+    btn.addEventListener('click', () => deleteChild(btn.dataset.delete));
+  });
+  list.querySelectorAll('[data-history]').forEach((el) => {
+    el.addEventListener('click', () => openChildHistoryModal(el.dataset.history));
+  });
+}
+
+function renderAttendance() {
+  const viewDate = attendanceViewDate;
+  const todayDow = viewDate.getDay();
+  const key = dateKey(viewDate);
+  const isToday = dateKey(new Date()) === key;
+
+  document.getElementById('todayLabel').textContent = formatDateKR(viewDate) + (isToday ? ' (오늘)' : '');
+
+  if (!data.attendance[key]) data.attendance[key] = {};
+  if (!extraChildIdsByDate[key]) extraChildIdsByDate[key] = [];
+  const extraIds = extraChildIdsByDate[key];
+
+  // 오늘 출석은 관리자여도 본인 담당 대상자만 보이게 한다 (다른 화면의 "관리자는 전체 보기"와는 별개).
+  const visible = getOwnChildren();
+  const scheduled = visible
+    .filter((c) => c.days.includes(todayDow))
+    .sort((a, b) => (a.dayTimes?.[todayDow] || '').localeCompare(b.dayTimes?.[todayDow] || ''));
+  const scheduledIds = new Set(scheduled.map((c) => c.id));
+
+  // 그날 출석 기록이 이미 있는(보강으로 추가됐던) 대상자는 새로고침 후에도 계속 보이도록 유지
+  Object.keys(data.attendance[key]).forEach((cid) => {
+    if (!scheduledIds.has(cid) && !extraIds.includes(cid) && visible.some((c) => c.id === cid)) {
+      extraIds.push(cid);
+    }
+  });
+
+  const extraChildren = extraIds.map((cid) => visible.find((c) => c.id === cid)).filter(Boolean);
+  const todayChildren = [...scheduled, ...extraChildren];
+
+  const list = document.getElementById('attendanceList');
+  const empty = document.getElementById('attendanceEmpty');
+  const makeupSelect = document.getElementById('makeupChildSelect');
+
+  const todayIds = new Set(todayChildren.map((c) => c.id));
+  const makeupOptions = visible
+    .filter((c) => !todayIds.has(c.id))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  makeupSelect.innerHTML =
+    '<option value="">+ 보강 인원 추가</option>' +
+    makeupOptions.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  makeupSelect.value = '';
+  makeupSelect.onchange = () => {
+    const cid = makeupSelect.value;
+    if (!cid) return;
+    extraChildIdsByDate[key].push(cid);
+    renderAttendance();
+  };
+
+  if (!todayChildren.length) {
+    list.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  const makeupTimeOptions = generateTimeOptions(10);
+
+  // 시간대별로 묶어서 보여준다. 정규 시간이 없는(아직 시간 미지정) 보강 인원은 맨 뒤 "시간 미정" 묶음으로.
+  const groups = new Map(); // time(''=미정) -> children[]
+  todayChildren.forEach((c) => {
+    const isMakeup = !scheduledIds.has(c.id);
+    const record = data.attendance[key][c.id] || { status: '', reason: '', makeupTime: '' };
+    const time = isMakeup ? (record.makeupTime || '') : (c.dayTimes?.[todayDow] || '');
+    if (!groups.has(time)) groups.set(time, []);
+    groups.get(time).push(c);
+  });
+  const sortedTimes = [...groups.keys()].sort((a, b) => {
+    if (!a) return 1;
+    if (!b) return -1;
+    return a.localeCompare(b);
+  });
+
+  list.innerHTML = sortedTimes
+    .map((time) => {
+      const groupLabel = time ? time.slice(0, 5) : '시간 미정';
+      const cardsHtml = groups
+        .get(time)
+        .map((c) => {
+          const record = data.attendance[key][c.id] || { status: '', reason: '', makeupTime: '', count: 1 };
+          const isAbsent = record.status === 'absent';
+          const isPresent = record.status === 'present';
+          const isMakeup = !scheduledIds.has(c.id);
+          const timeDisplay = isMakeup
+            ? `<select class="makeup-time-select">
+                <option value="">시간 선택</option>
+                ${makeupTimeOptions.map((t) => `<option value="${t}" ${t === record.makeupTime ? 'selected' : ''}>${t}</option>`).join('')}
+              </select>`
+            : esc((c.dayTimes?.[todayDow] || '').slice(0, 5));
+          const countValue = record.count ?? 1;
+          const countSelect = `<select class="present-count-select" ${isPresent ? '' : 'disabled'} title="이 날 출석 횟수 (하루 2번 오면 2, 20분씩 나눠 오면 0.5)">
+              ${PRESENT_COUNT_OPTIONS.map((v) => `<option value="${v}" ${v === countValue ? 'selected' : ''}>${v}회</option>`).join('')}
+            </select>`;
+          return `
+          <div class="card" data-child="${c.id}">
+            <div class="child-name">${esc(c.name)}${isMakeup ? ' <span class="badge makeup-badge">보강</span>' : ''}</div>
+            <div class="child-meta">${timeDisplay} · ${esc(c.teacher)} · ${SUBJECTS[c.subject]?.label}</div>
+            <div class="attendance-row" style="margin-top:.75rem">
+              <div class="status-btns">
+                <button class="status-btn ${record.status === 'present' ? 'active-present' : ''}" data-status="present">출석</button>
+                <button class="status-btn ${record.status === 'absent' ? 'active-absent' : ''}" data-status="absent">결석</button>
+              </div>
+              ${countSelect}
+              <input class="absence-reason" placeholder="결석 사유" value="${esc(record.reason)}"
+                ${isAbsent ? '' : 'disabled'}>
+              ${isMakeup ? '<button type="button" class="btn btn-sm btn-danger remove-makeup">제외</button>' : ''}
+            </div>
+            <textarea class="service-note" placeholder="서비스 제공내용 및 특이사항">${esc(record.note || '')}</textarea>
+          </div>`;
+        })
+        .join('');
+      return `
+      <div class="attendance-time-group">
+        <div class="attendance-time-group-label">${esc(groupLabel)}</div>
+        <div class="attendance-time-group-cards">${cardsHtml}</div>
+      </div>`;
+    })
+    .join('');
+
+  const saveReasonDebounced = debounce(async (cid, reason) => {
+    const { error } = await supabaseClient
+      .from('attendance')
+      .upsert({ child_id: cid, date: key, status: data.attendance[key][cid]?.status || 'absent', reason }, { onConflict: 'child_id,date' });
+    if (error) {
+      console.error(error);
+      alert('결석 사유 저장 중 오류가 발생했습니다.');
+    }
+  }, 600);
+
+  const saveNoteDebounced = debounce(async (cid, note) => {
+    const { error } = await supabaseClient
+      .from('attendance')
+      .upsert({ child_id: cid, date: key, status: data.attendance[key][cid]?.status || '', note }, { onConflict: 'child_id,date' });
+    if (error) {
+      console.error(error);
+      alert('일지 저장 중 오류가 발생했습니다.');
+    }
+  }, 600);
+
+  list.querySelectorAll('.card').forEach((card) => {
+    const cid = card.dataset.child;
+    card.querySelectorAll('[data-status]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const status = btn.dataset.status;
+        const reason = status === 'absent' ? (data.attendance[key][cid]?.reason || '') : '';
+
+        const makeupTime = data.attendance[key][cid]?.makeupTime || '';
+        const count = data.attendance[key][cid]?.count ?? 1;
+        const note = data.attendance[key][cid]?.note || '';
+        const { error } = await supabaseClient
+          .from('attendance')
+          .upsert({ child_id: cid, date: key, status, reason, makeup_time: makeupTime || null, count }, { onConflict: 'child_id,date' });
+        if (error) {
+          console.error(error);
+          alert('출석 저장 중 오류가 발생했습니다.');
+          return;
+        }
+
+        data.attendance[key][cid] = { status, reason, makeupTime, count, note };
+        renderAttendance();
+      });
+    });
+    const reasonInput = card.querySelector('.absence-reason');
+    reasonInput?.addEventListener('input', () => {
+      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: 'absent', reason: '', makeupTime: '', count: 1, note: '' };
+      data.attendance[key][cid].reason = reasonInput.value;
+      saveReasonDebounced(cid, reasonInput.value);
+    });
+
+    const noteInput = card.querySelector('.service-note');
+    noteInput?.addEventListener('input', () => {
+      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: '', reason: '', makeupTime: '', count: 1, note: '' };
+      data.attendance[key][cid].note = noteInput.value;
+      saveNoteDebounced(cid, noteInput.value);
+    });
+
+    card.querySelector('.makeup-time-select')?.addEventListener('change', async (e) => {
+      const time = e.target.value;
+      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: '', reason: '', makeupTime: '', count: 1 };
+      data.attendance[key][cid].makeupTime = time;
+      const { error } = await supabaseClient
+        .from('attendance')
+        .upsert(
+          {
+            child_id: cid,
+            date: key,
+            status: data.attendance[key][cid].status || '',
+            reason: data.attendance[key][cid].reason || '',
+            makeup_time: time || null,
+            count: data.attendance[key][cid].count ?? 1,
+          },
+          { onConflict: 'child_id,date' }
+        );
+      if (error) {
+        console.error(error);
+        alert('보강 시간 저장 중 오류가 발생했습니다.');
+      }
+    });
+
+    card.querySelector('.present-count-select')?.addEventListener('change', async (e) => {
+      const count = Number(e.target.value);
+      if (!data.attendance[key][cid]) data.attendance[key][cid] = { status: 'present', reason: '', makeupTime: '', count: 1 };
+      data.attendance[key][cid].count = count;
+      const { error } = await supabaseClient
+        .from('attendance')
+        .upsert(
+          {
+            child_id: cid,
+            date: key,
+            status: data.attendance[key][cid].status || 'present',
+            reason: data.attendance[key][cid].reason || '',
+            makeup_time: data.attendance[key][cid].makeupTime || null,
+            count,
+          },
+          { onConflict: 'child_id,date' }
+        );
+      if (error) {
+        console.error(error);
+        alert('출석 횟수 저장 중 오류가 발생했습니다.');
+      }
+    });
+
+    card.querySelector('.remove-makeup')?.addEventListener('click', async () => {
+      if (data.attendance[key][cid]) {
+        if (!confirm('이미 체크된 출석 기록도 함께 삭제할까요?')) return;
+        const { error } = await supabaseClient.from('attendance').delete().eq('child_id', cid).eq('date', key);
+        if (error) {
+          console.error(error);
+          alert('삭제 중 오류가 발생했습니다.');
+          return;
+        }
+        delete data.attendance[key][cid];
+      }
+      extraChildIdsByDate[key] = extraChildIdsByDate[key].filter((id) => id !== cid);
+      renderAttendance();
+    });
+  });
+}
+
+function getFeeRecord(childId) {
+  const mk = monthKey(feeViewYear, feeViewMonth);
+  if (!data.monthlyFees[mk]) data.monthlyFees[mk] = {};
+  if (!data.monthlyFees[mk][childId]) {
+    const child = data.children.find((c) => c.id === childId);
+    const auto = child ? countSessionsInMonth(feeViewYear, feeViewMonth, child.days) : 0;
+    data.monthlyFees[mk][childId] = {
+      sessionCount: auto,
+      additionalDepositDate: '',
+      additionalAmount: null,
+      additionalPaid: false,
+      additionalPaymentMethod: '',
+      carryoverAmount: 0,
+      extraSubjectEnabled: false,
+      extraSessionCount: 0,
+      copayDepositDate: '',
+      copayAmount: null,
+      copayPaid: false,
+      notes: '',
+    };
+  }
+  return data.monthlyFees[mk][childId];
+}
+
+async function persistFeeRecord(childId) {
+  const mk = monthKey(feeViewYear, feeViewMonth);
+  const rec = getFeeRecord(childId);
+  const { error } = await supabaseClient.from('monthly_fees').upsert(
+    {
+      child_id: childId,
+      month_key: mk,
+      session_count: rec.sessionCount,
+      additional_deposit_date: rec.additionalDepositDate || null,
+      additional_amount: rec.additionalAmount ?? null,
+      additional_paid: rec.additionalPaid || false,
+      additional_payment_method: rec.additionalPaymentMethod || null,
+      carryover_amount: rec.carryoverAmount || 0,
+      extra_subject_enabled: rec.extraSubjectEnabled || false,
+      extra_session_count: rec.extraSessionCount || 0,
+      copay_deposit_date: rec.copayDepositDate || null,
+      copay_amount: rec.copayAmount ?? null,
+      copay_paid: rec.copayPaid || false,
+      notes: rec.notes || '',
+    },
+    { onConflict: 'child_id,month_key' }
+  );
+  if (error) {
+    console.error(error);
+    alert('수업료 정보 저장 중 오류가 발생했습니다.');
+  }
+}
+
+const persistFeeRecordDebounced = debounce(persistFeeRecord, 600);
+
+// 학부모에게 카톡 등으로 보내기 좋게, 이용료 정산 내역만 깔끔하게 1:1 정사각형 이미지로 캡쳐한다.
+async function captureFeeSummary(childId) {
+  const child = data.children.find((c) => c.id === childId);
+  if (!child) return;
+
+  const feeRec = getFeeRecord(childId);
+  const fee = calculateMonthlyFee(child, feeRec.sessionCount);
+  const netAdditional = getNetAdditionalPayment(fee, feeRec, child);
+  const showCopay = needsCopayField(child);
+
+  const basisLabel = `${SUBJECTS[child.subject]?.label || ''} ${feeRec.sessionCount}회`;
+  const accountNotes = [{ label: '추가금 입금 계좌', account: PAYMENT_ACCOUNTS.additional }];
+  if (showCopay && fee.copay > 0) {
+    accountNotes.push({ label: '본인부담금 입금 계좌', account: getCopayAccountNote(child) });
+  }
+
+  // 6·7회차 추가금은 이미 추가납부액 계산에 녹아 있는 설명용 숫자라, 별도 줄로 또 보여주면
+  // "추가납부액에 이 만큼이 더 붙는다"로 오해하기 쉬워서 안내 표에서는 뺀다.
+  const infoRows = [{ label: '총 금액', sub: basisLabel, value: formatCurrency(fee.baseTotal) }];
+  fee.voucherDeductionItems.forEach((item) => {
+    infoRows.push({
+      label: `바우처 차감 (${item.label})`,
+      value: `-${formatCurrency(item.amount)}`,
+      deduct: true,
+    });
+  });
+  if ((feeRec.carryoverAmount || 0) > 0) {
+    infoRows.push({ label: '이월 금액 차감', value: `-${formatCurrency(feeRec.carryoverAmount)}`, deduct: true });
+  }
+  if (feeRec.extraSubjectEnabled && (feeRec.extraSessionCount || 0) > 0) {
+    const otherLabel = SUBJECTS[getOtherSubject(child.subject)]?.label || '';
+    infoRows.push({
+      label: `추가 과목 (${otherLabel})`,
+      sub: `${otherLabel} ${feeRec.extraSessionCount}회`,
+      value: `+${formatCurrency(getExtraSubjectFee(child, feeRec))}`,
+    });
+  }
+
+  // 실제로 납부해야 하는 금액만 따로 네모 박스에 모아서 눈에 띄게 보여준다.
+  const payRows = [{ label: '추가납부액', value: formatCurrency(netAdditional) }];
+  if (showCopay && fee.copay > 0) {
+    payRows.push({ label: '본인부담금', value: formatCurrency(fee.copay) });
+  }
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText =
+    'position:fixed; left:-9999px; top:0; width:600px; padding:40px; background:#ffffff; box-sizing:border-box; font-family:inherit;';
+  wrap.innerHTML = `
+    <div style="text-align:center; margin-bottom:24px;">
+      <div style="font-size:22px; font-weight:800; color:#111827;">${esc(child.name)} 이용료 정산 내역</div>
+      <div style="font-size:15px; color:#6b7280; margin-top:4px;">${feeViewYear}년 ${feeViewMonth}월</div>
+    </div>
+    <table style="width:100%; border-collapse:collapse; font-size:16px;">
+      ${infoRows
+        .map(
+          (r) => `
+        <tr>
+          <td style="padding:12px 6px; border-bottom:1px solid #e5e7eb; color:#4b5563; vertical-align:top;">
+            ${esc(r.label)}
+            ${r.sub ? `<div style="font-size:12px; color:#9ca3af; font-weight:400; margin-top:2px;">${esc(r.sub)}</div>` : ''}
+          </td>
+          <td style="padding:12px 6px; border-bottom:1px solid #e5e7eb; text-align:right; font-weight:700; color:${r.deduct ? '#2563eb' : '#111827'};">${r.value}</td>
+        </tr>`
+        )
+        .join('')}
+    </table>
+    <div style="margin-top:20px; border:2px solid #111827; border-radius:12px; padding:16px 20px;">
+      <div style="font-size:14px; font-weight:700; color:#111827; margin-bottom:10px;">💰 납부하실 금액</div>
+      ${payRows
+        .map(
+          (r) => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0;">
+          <div style="font-size:16px; color:#374151;">${esc(r.label)}</div>
+          <div style="font-size:20px; font-weight:800; color:#111827;">${r.value}</div>
+        </div>`
+        )
+        .join('')}
+    </div>
+    <div style="margin-top:18px;">
+      ${accountNotes
+        .map(
+          (n) => `
+        <div style="font-size:12px; color:#9ca3af; margin-bottom:3px;">${esc(n.label)}</div>
+        <div style="font-size:15px; font-weight:700; color:#111827; margin-bottom:10px;">${esc(n.account)}</div>`
+        )
+        .join('')}
+    </div>
+    <div style="margin-top:20px; text-align:center;">
+      <img src="assets/logo.png" style="width:220px; height:auto;">
+    </div>`;
+  document.body.appendChild(wrap);
+
+  try {
+    const logoImg = wrap.querySelector('img');
+    if (logoImg && !logoImg.complete) {
+      await new Promise((resolve) => {
+        logoImg.addEventListener('load', resolve, { once: true });
+        logoImg.addEventListener('error', resolve, { once: true });
+      });
+    }
+    const canvas = await html2canvas(wrap, { backgroundColor: '#ffffff', scale: 2 });
+    const size = Math.max(canvas.width, canvas.height);
+    const squareCanvas = document.createElement('canvas');
+    squareCanvas.width = size;
+    squareCanvas.height = size;
+    const ctx = squareCanvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, size, size);
+    ctx.drawImage(canvas, (size - canvas.width) / 2, (size - canvas.height) / 2);
+
+    // 파일로 내려받지 않고 클립보드에만 복사해서, 카톡 등에 바로 붙여넣을 수 있게 한다.
+    let copied = false;
+    try {
+      const blob = await new Promise((resolve) => squareCanvas.toBlob(resolve, 'image/png'));
+      if (blob && navigator.clipboard?.write) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        copied = true;
+      }
+    } catch (clipErr) {
+      console.error(clipErr);
+    }
+
+    if (copied) {
+      alert('복사되었습니다.');
+    } else {
+      // 클립보드 복사가 안 되는 브라우저는 파일 저장으로 대신한다.
+      const link = document.createElement('a');
+      link.download = `${child.name}_${feeViewYear}-${String(feeViewMonth).padStart(2, '0')}_이용료.png`;
+      link.href = squareCanvas.toDataURL('image/png');
+      link.click();
+      alert('이 브라우저에서는 클립보드 복사가 지원되지 않아 파일로 저장했습니다.');
+    }
+  } catch (err) {
+    console.error(err);
+    alert('이미지 캡쳐 중 오류가 발생했습니다.');
+  } finally {
+    document.body.removeChild(wrap);
+  }
+}
+
+function renderFees() {
+  document.getElementById('feeMonthLabel').textContent = `${feeViewYear}년 ${feeViewMonth}월`;
+  const list = document.getElementById('feesList');
+  const checkboxWrap = document.getElementById('feesChildCheckboxes');
+  const allChildren = getOwnChildren();
+
+  if (!allChildren.length) {
+    checkboxWrap.innerHTML = '';
+    list.innerHTML = '<p class="empty-msg">등록된 대상자가 없습니다.</p>';
+    return;
+  }
+
+  checkboxWrap.innerHTML = allChildren
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+    .map(
+      (c) => `
+      <label class="day-check">
+        <input type="checkbox" class="fees-child-checkbox" value="${c.id}" ${feesIncludedIds.has(c.id) ? 'checked' : ''}>
+        ${esc(c.name)}
+      </label>`
+    )
+    .join('');
+  checkboxWrap.querySelectorAll('.fees-child-checkbox').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) feesIncludedIds.add(cb.value);
+      else feesIncludedIds.delete(cb.value);
+      renderFees();
+    });
+  });
+
+  const children = allChildren.filter((c) => feesIncludedIds.has(c.id));
+
+  if (!children.length) {
+    list.innerHTML = '<p class="empty-msg">선택된 대상자가 없습니다. 위에서 대상자를 선택해 주세요.</p>';
+    return;
+  }
+
+  list.innerHTML = children
+    .map((c) => {
+      const autoCount = countSessionsInMonth(feeViewYear, feeViewMonth, c.days);
+      const feeRec = getFeeRecord(c.id);
+      const sessionCount = feeRec.sessionCount ?? autoCount;
+      const fee = calculateMonthlyFee(c, sessionCount);
+      const showCopay = needsCopayField(c);
+      const netAdditional = getNetAdditionalPayment(fee, feeRec, c);
+
+      const paymentRows = [];
+      if (netAdditional !== 0) {
+        const isNegative = netAdditional < 0;
+        paymentRows.push(`
+          <tr>
+            <td>추가납부액</td>
+            <td class="amount amount-strong${isNegative ? ' amount-negative' : ''}">${formatCurrency(netAdditional)}</td>
+            <td>${esc(PAYMENT_ACCOUNTS.additional)}</td>
+          </tr>`);
+      }
+      if (showCopay && fee.copay > 0) {
+        paymentRows.push(`
+          <tr>
+            <td>본인부담금</td>
+            <td class="amount">${formatCurrency(fee.copay)}</td>
+            <td>${esc(getCopayAccountNote(c))}</td>
+          </tr>`);
+      }
+      const paymentTableHtml = paymentRows.length
+        ? `
+        <div class="payment-table-wrap">
+          <table class="payment-table">
+            <thead><tr><th>구분</th><th>금액</th><th>입금 계좌</th></tr></thead>
+            <tbody>${paymentRows.join('')}</tbody>
+          </table>
+        </div>`
+        : '<p class="empty-msg payment-table-empty">이번 달 별도 납부할 금액이 없습니다.</p>';
+
+      return `
+      <div class="card fee-card" data-fee-child="${c.id}">
+        <div class="fee-card-top">
+          <div class="child-name child-name-link" data-history="${c.id}">${esc(c.name)}</div>
+          <button type="button" class="btn btn-sm capture-fee-btn">📸 이용료 캡쳐</button>
+        </div>
+        <div class="child-meta">
+          ${getDayLabels(c.days)} · ${SUBJECTS[c.subject]?.label} ·
+          ${esc(c.paymentTypes?.length ? c.paymentTypes.map((t) => PAYMENT_TYPES[t] || t).join(' + ') : PAYMENT_TYPES.none)}
+          · ${esc(c.teacher)}
+        </div>
+
+        <div class="fee-input-row">
+          <label>해당 월 수업 횟수</label>
+          <span class="text-muted">(자동: ${autoCount}회)</span>
+          <input type="number" class="session-count" min="0" max="31" value="${sessionCount}">
+          <span>회</span>
+        </div>
+
+        <div class="fee-input-row">
+          <label class="paid-check">
+            <input type="checkbox" class="extra-subject-toggle" ${feeRec.extraSubjectEnabled ? 'checked' : ''}>
+            다른 과목도 함께 결제 (${esc(SUBJECTS[getOtherSubject(c.subject)]?.label || '')})
+          </label>
+          ${feeRec.extraSubjectEnabled ? `
+          <input type="number" class="extra-session-count" min="0" max="31" value="${feeRec.extraSessionCount || 0}">
+          <span>회 = ${formatCurrency(getExtraSubjectFee(c, feeRec))}</span>` : ''}
+        </div>
+
+        <div class="fee-summary">
+          <div class="fee-item">
+            <div class="label">총 금액</div>
+            <div class="value">${formatCurrency(fee.baseTotal)}</div>
+          </div>
+          ${fee.voucherDeduction > 0 ? `
+          <div class="fee-item">
+            <div class="label">바우처 차감 <span class="fee-deduct-labels">(${esc(fee.voucherDeductionLabels.join(', '))})</span></div>
+            <div class="value fee-deduct">-${formatCurrency(fee.voucherDeduction)}</div>
+          </div>` : ''}
+          ${fee.extra6Amount > 0 ? `
+          <div class="fee-item">
+            <div class="label">6회차 추가금</div>
+            <div class="value">+${formatCurrency(fee.extra6Amount)}</div>
+          </div>` : ''}
+          ${fee.extra7Amount > 0 ? `
+          <div class="fee-item">
+            <div class="label">7회차 이후 추가금</div>
+            <div class="value">+${formatCurrency(fee.extra7Amount)}</div>
+          </div>` : ''}
+        </div>
+
+        <div class="fee-input-row">
+          <label>이월 금액 차감</label>
+          <input type="text" inputmode="numeric" class="carryover-amount money-input" value="${formatMoneyInputValue(feeRec.carryoverAmount || 0)}" placeholder="0원">
+          <span class="text-muted">(추가납부액에서만 차감, 본인부담금엔 영향 없음)</span>
+        </div>
+
+        ${paymentTableHtml}
+
+        <ul class="fee-breakdown">${fee.breakdown.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>
+
+        <div class="deposit-section">
+          <div class="fee-input-row">
+            <label>추가금 입금일</label>
+            <input type="date" class="additional-date" value="${feeRec.additionalDepositDate || ''}">
+            <input type="text" inputmode="numeric" class="additional-amount money-input" value="${formatMoneyInputValue(feeRec.additionalAmount ?? netAdditional)}" placeholder="추가납부액">
+            <select class="additional-method">
+              <option value="">결제 수단</option>
+              ${Object.entries(PAYMENT_METHODS)
+                .map(([k, v]) => `<option value="${k}" ${feeRec.additionalPaymentMethod === k ? 'selected' : ''}>${v}</option>`)
+                .join('')}
+            </select>
+            <label class="paid-check">
+              <input type="checkbox" class="additional-paid" ${feeRec.additionalPaid ? 'checked' : ''}>
+              납부 확인
+            </label>
+          </div>
+          ${showCopay && fee.copay > 0 ? `
+          <div class="fee-input-row">
+            <label>본인부담금 입금일</label>
+            <input type="date" class="copay-date" value="${feeRec.copayDepositDate || ''}">
+            <input type="text" inputmode="numeric" class="copay-amount money-input" value="${formatMoneyInputValue(feeRec.copayAmount ?? fee.copay)}" placeholder="본인부담금">
+            <label class="paid-check">
+              <input type="checkbox" class="copay-paid" ${feeRec.copayPaid ? 'checked' : ''}>
+              납부 확인
+            </label>
+          </div>` : ''}
+        </div>
+
+        <div class="fee-input-row">
+          <label>비고</label>
+          <textarea class="fee-notes" placeholder="보강 잔여 등">${esc(feeRec.notes || '')}</textarea>
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  list.querySelectorAll('[data-fee-child]').forEach((card) => {
+    const cid = card.dataset.feeChild;
+
+    card.querySelector('[data-history]')?.addEventListener('click', () => openChildHistoryModal(cid));
+    card.querySelector('.capture-fee-btn')?.addEventListener('click', () => captureFeeSummary(cid));
+
+    card.querySelector('.session-count')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).sessionCount = Math.max(0, Number(e.target.value) || 0);
+      await persistFeeRecord(cid);
+      renderFees();
+    });
+
+    card.querySelector('.extra-subject-toggle')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).extraSubjectEnabled = e.target.checked;
+      await persistFeeRecord(cid);
+      renderFees();
+    });
+
+    card.querySelector('.extra-session-count')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).extraSessionCount = Math.max(0, Number(e.target.value) || 0);
+      await persistFeeRecord(cid);
+      renderFees();
+    });
+
+    card.querySelector('.additional-date')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).additionalDepositDate = e.target.value;
+      await persistFeeRecord(cid);
+    });
+
+    card.querySelector('.additional-amount')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).additionalAmount = parseMoneyInputValue(e.target.value);
+      e.target.value = formatMoneyInputValue(getFeeRecord(cid).additionalAmount);
+      await persistFeeRecord(cid);
+    });
+
+    card.querySelector('.carryover-amount')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).carryoverAmount = parseMoneyInputValue(e.target.value);
+      e.target.value = formatMoneyInputValue(getFeeRecord(cid).carryoverAmount);
+      await persistFeeRecord(cid);
+      renderFees();
+    });
+
+    card.querySelector('.additional-method')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).additionalPaymentMethod = e.target.value;
+      await persistFeeRecord(cid);
+    });
+
+    card.querySelector('.additional-paid')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).additionalPaid = e.target.checked;
+      await persistFeeRecord(cid);
+    });
+
+    card.querySelector('.copay-date')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).copayDepositDate = e.target.value;
+      await persistFeeRecord(cid);
+    });
+
+    card.querySelector('.copay-amount')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).copayAmount = parseMoneyInputValue(e.target.value);
+      e.target.value = formatMoneyInputValue(getFeeRecord(cid).copayAmount);
+      await persistFeeRecord(cid);
+    });
+
+    card.querySelector('.copay-paid')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).copayPaid = e.target.checked;
+      await persistFeeRecord(cid);
+    });
+
+    card.querySelector('.fee-notes')?.addEventListener('input', (e) => {
+      getFeeRecord(cid).notes = e.target.value;
+      persistFeeRecordDebounced(cid);
+    });
+
+    card.querySelectorAll('.money-input').forEach((el) => attachMoneyInputFormatting(el));
+  });
+}
+
+function renderSchedule() {
+  document.getElementById('scheduleTitle').textContent = `${currentUser?.name || ''} 시간표 (월~토)`;
+  const wrap = document.getElementById('scheduleTableWrap');
+  const children = getOwnChildren().filter((c) => c.dayTimes && Object.keys(c.dayTimes).length);
+  const scheduleDays = DAYS.slice(1); // 월~토 (일요일 제외)
+
+  if (!children.length) {
+    wrap.innerHTML = '<p class="empty-msg">등록된 수업 시간이 없습니다.</p>';
+    return;
+  }
+
+  const times = [...new Set(children.flatMap((c) => Object.values(c.dayTimes).filter(Boolean)))].sort();
+
+  const rows = times
+    .map((t) => {
+      const end = addMinutesToTime(t, CLASS_DURATION_MIN);
+      const cells = scheduleDays
+        .map((d) => {
+          const kids = children.filter((c) => c.dayTimes[d.value] === t).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+          const content = kids
+            .map((c) => {
+              const voucherTags = c.paymentTypes?.length
+                ? c.paymentTypes
+                    .map((pt) => `<span class="voucher-tag voucher-tag-${pt}">${esc(SCHEDULE_VOUCHER_LABELS[pt] || PAYMENT_TYPES[pt] || pt)}</span>`)
+                    .join('')
+                : `<span class="voucher-tag">${esc(PAYMENT_TYPES.none)}</span>`;
+              return `
+              <div class="schedule-child">
+                ${esc(c.name)}
+                <span class="schedule-meta">${voucherTags}</span>
+              </div>`;
+            })
+            .join('');
+          const gridClass = kids.length >= 2 ? 'schedule-cell-grid two-col' : 'schedule-cell-grid';
+          return `<td><div class="${gridClass}">${content}</div></td>`;
+        })
+        .join('');
+      return `<tr><th>${t.slice(0, 5)}~${end}</th>${cells}</tr>`;
+    })
+    .join('');
+
+  wrap.innerHTML = `
+    <div class="payment-table-wrap">
+      <table class="schedule-table">
+        <thead><tr><th>시간</th>${scheduleDays.map((d) => `<th>${d.label}</th>`).join('')}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+// 브라우저 인쇄 대신 엑셀로 내려받아 엑셀 자체의 "한 페이지에 맞춤" 인쇄 기능을 쓸 수 있게 한다.
+// 시간표 화면의 바우처 태그 배경색과 맞춘 엑셀 채우기 색
+const SCHEDULE_VOUCHER_FILL_COLORS = {
+  developmental: 'D1D5DB',
+  'edu-therapy': 'FDBA74',
+  'edu-afterschool': 'FBCFE8',
+  sports: '7DD3FC',
+  infant: 'E5E7EB',
+  none: 'FFFFFF',
+};
+
+function exportScheduleExcel() {
+  const children = getOwnChildren().filter((c) => c.dayTimes && Object.keys(c.dayTimes).length);
+  const scheduleDays = DAYS.slice(1); // 월~토
+  if (!children.length) {
+    alert('등록된 수업 시간이 없습니다.');
+    return;
+  }
+
+  const times = [...new Set(children.flatMap((c) => Object.values(c.dayTimes).filter(Boolean)))].sort();
+  const title = `${currentUser?.name || ''} 시간표 (월~토)`;
+  const totalCols = scheduleDays.length + 1;
+
+  const aoa = [];
+  aoa.push([title, ...Array(scheduleDays.length).fill('')]);
+  aoa.push(['시간', ...scheduleDays.map((d) => d.label)]);
+
+  const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } }];
+  const fillByAddr = {}; // '{row}:{col}' -> fgColor rgb (한 칸에 한 명씩 넣어 사람마다 색이 안 겹치게 함)
+
+  times.forEach((t) => {
+    const end = addMinutesToTime(t, CLASS_DURATION_MIN);
+    const kidsByDay = scheduleDays.map((d) =>
+      children.filter((c) => c.dayTimes[d.value] === t).sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+    );
+    const maxKids = Math.max(1, ...kidsByDay.map((kids) => kids.length));
+    const startRow = aoa.length;
+
+    for (let sub = 0; sub < maxKids; sub++) {
+      const row = [sub === 0 ? `${t.slice(0, 5)}~${end}` : ''];
+      kidsByDay.forEach((kids, colIdx) => {
+        const c = kids[sub];
+        if (!c) {
+          row.push('');
+          return;
+        }
+        const labels = c.paymentTypes?.length
+          ? c.paymentTypes.map((pt) => SCHEDULE_VOUCHER_LABELS[pt] || PAYMENT_TYPES[pt] || pt).join('/')
+          : PAYMENT_TYPES.none;
+        row.push(`${c.name} (${labels})`);
+        const voucherKey = c.paymentTypes?.[0] || 'none';
+        fillByAddr[`${startRow + sub}:${colIdx + 1}`] = SCHEDULE_VOUCHER_FILL_COLORS[voucherKey] || SCHEDULE_VOUCHER_FILL_COLORS.none;
+      });
+      aoa.push(row);
+    }
+
+    if (maxKids > 1) {
+      merges.push({ s: { r: startRow, c: 0 }, e: { r: startRow + maxKids - 1, c: 0 } });
+    }
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!merges'] = merges;
+  ws['!cols'] = [{ wch: 12 }, ...scheduleDays.map(() => ({ wch: 16 }))];
+
+  const thinBorder = { style: 'thin', color: { rgb: '000000' } };
+  const border = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };
+
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      if (!ws[addr]) ws[addr] = { t: 's', v: '' };
+      const isTitle = r === 0;
+      const isHeader = r === 1;
+      const fillColor = isHeader ? 'F1F5F9' : fillByAddr[`${r}:${c}`];
+      ws[addr].s = {
+        border,
+        alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+        font: { bold: isTitle || isHeader, sz: isTitle ? 13 : 11 },
+        fill: fillColor ? { fgColor: { rgb: fillColor } } : undefined,
+      };
+    }
+  }
+
+  // 엑셀 자체의 "한 페이지에 맞춤" 인쇄가 기본으로 켜지도록 페이지 설정을 지정한다.
+  ws['!pageSetup'] = { orientation: 'landscape', fitToWidth: 1, fitToHeight: 1, paperSize: 9 };
+  ws['!fitToPage'] = true;
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '시간표');
+  XLSX.writeFile(wb, `${title}.xlsx`);
+}
+
+function getPaymentStatus(child, year, month) {
+  const mk = monthKey(year, month);
+  const feeRec = data.monthlyFees[mk]?.[child.id];
+  const sessionCount = feeRec?.sessionCount ?? countSessionsInMonth(year, month, child.days);
+  const fee = calculateMonthlyFee(child, sessionCount);
+
+  const needsAdditional = getNetAdditionalPayment(fee, feeRec, child) > 0;
+  const needsCopay = needsCopayField(child) && fee.copay > 0;
+  if (!needsAdditional && !needsCopay) return null;
+
+  const additionalOk = !needsAdditional || !!feeRec?.additionalPaid;
+  const copayOk = !needsCopay || !!feeRec?.copayPaid;
+  return additionalOk && copayOk ? 'paid' : 'unpaid';
+}
+
+// 월 출석부에 표시할 순서: 출석 요일이 이른 순(월→토)으로, 같은 요일이면 시간 순으로 정렬
+function sortChildrenByAttendanceDay(children) {
+  const dayOrder = (d) => (d === 0 ? 7 : d); // 일요일은 쓰지 않지만 혹시 있으면 맨 뒤로
+  return [...children].sort((a, b) => {
+    const aDays = a.days?.length ? [...a.days].sort((x, y) => dayOrder(x) - dayOrder(y)) : [];
+    const bDays = b.days?.length ? [...b.days].sort((x, y) => dayOrder(x) - dayOrder(y)) : [];
+    const aDay = aDays.length ? dayOrder(aDays[0]) : 99;
+    const bDay = bDays.length ? dayOrder(bDays[0]) : 99;
+    if (aDay !== bDay) return aDay - bDay;
+    const aTime = (aDays.length && a.dayTimes?.[aDays[0]]) || '';
+    const bTime = (bDays.length && b.dayTimes?.[bDays[0]]) || '';
+    if (aTime !== bTime) return aTime.localeCompare(bTime);
+    return a.name.localeCompare(b.name, 'ko');
+  });
+}
+
+function computeMonthlyAttendanceData(year, month) {
+  const children = sortChildrenByAttendanceDay(getOwnChildren());
+  const lastDay = new Date(year, month, 0).getDate();
+  const dateList = Array.from({ length: lastDay }, (_, i) => i + 1);
+
+  let grandTotal = 0;
+  const rows = children.map((c) => {
+    let presentCount = 0;
+    const cells = dateList.map((d) => {
+      const dow = new Date(year, month - 1, d).getDay();
+      const isScheduled = c.days.includes(dow);
+      const key = dateKey(new Date(year, month - 1, d));
+      const record = data.attendance[key]?.[c.id];
+      if (!record || !record.status) return { type: isScheduled ? 'empty' : 'noclass' };
+      const isMakeup = !isScheduled;
+      if (record.status === 'present') {
+        const count = record.count ?? 1;
+        presentCount += count;
+        return { type: 'present', isMakeup, count };
+      }
+      return { type: 'absent', reason: record.reason || '', isMakeup };
+    });
+    grandTotal += presentCount;
+    const paymentStatus = getPaymentStatus(c, year, month);
+    return { child: c, presentCount, cells, paymentStatus };
+  });
+
+  return { rows, dateList, grandTotal };
+}
+
+function renderMonthlyAttendance() {
+  document.getElementById('attMonthLabel').textContent = `${attViewYear}년 ${attViewMonth}월`;
+  const wrap = document.getElementById('monthlyAttendanceTableWrap');
+  const { rows, dateList, grandTotal } = computeMonthlyAttendanceData(attViewYear, attViewMonth);
+
+  if (!rows.length) {
+    wrap.innerHTML = '<p class="empty-msg">등록된 대상자가 없습니다.</p>';
+    return;
+  }
+
+  const headerDates = dateList.map((d) => `<th>${d}</th>`).join('');
+  const headerDays = dateList
+    .map((d) => {
+      const dow = new Date(attViewYear, attViewMonth - 1, d).getDay();
+      return `<th class="weekday-th">${WEEKDAY_LABELS[dow]}</th>`;
+    })
+    .join('');
+
+  const bodyRows = rows
+    .map(({ child: c, presentCount, cells, paymentStatus }) => {
+      const cellsHtml = cells
+        .map((cell, idx) => {
+          if (cell.type === 'noclass') return '<td class="att-noclass"></td>';
+          if (cell.type === 'empty') return '<td class="att-empty">-</td>';
+          const makeupMark = cell.isMakeup ? '<br><span class="att-makeup-mark">(보강)</span>' : '';
+          if (cell.type === 'present') {
+            const countMark = cell.count !== 1 ? `<br><span class="att-count-mark">${cell.count}회</span>` : '';
+            return `<td class="att-present">출석${countMark}${makeupMark}</td>`;
+          }
+          // 인쇄할 때 이름 밑에 사유가 길게 붙어 칸이 이상해지는 문제가 있어, 화면에는 사유를 바로 표시하지
+          // 않고 클릭하면 그 날의 결석 사유를 볼 수 있게 한다 (인쇄물에는 "결석"만 나감).
+          const hasReason = !!cell.reason;
+          return `<td class="att-absent${hasReason ? ' has-reason' : ''}" data-child="${c.id}" data-day="${dateList[idx]}" title="${hasReason ? '클릭하면 결석 사유를 볼 수 있어요' : ''}">결석${makeupMark}</td>`;
+        })
+        .join('');
+      const badge = paymentStatus === 'unpaid'
+        ? '<span class="att-payment-badge unpaid">미납</span>'
+        : paymentStatus === 'paid'
+          ? '<span class="att-payment-badge paid">납부완료</span>'
+          : '';
+      return `<tr><th class="att-name att-name-link" data-child="${c.id}" title="클릭하면 이 아이의 월 수업료 산정으로 이동합니다">${esc(c.name)}<span class="att-count">(${presentCount}회)</span>${badge}</th>${cellsHtml}</tr>`;
+    })
+    .join('');
+
+  const totalRow = `<tr class="att-total-row"><th class="att-name">합계<span class="att-count">(${grandTotal}회)</span></th>${dateList.map(() => '<td></td>').join('')}</tr>`;
+
+  wrap.innerHTML = `
+    <div class="payment-table-wrap">
+      <table class="schedule-table monthly-attendance-table">
+        <thead>
+          <tr><th>이름</th>${headerDates}</tr>
+          <tr><th></th>${headerDays}</tr>
+        </thead>
+        <tbody>${bodyRows}${totalRow}</tbody>
+      </table>
+    </div>`;
+
+  wrap.querySelectorAll('.att-absent.has-reason').forEach((td) => {
+    td.addEventListener('click', () => {
+      const day = Number(td.dataset.day);
+      const child = data.children.find((c) => String(c.id) === td.dataset.child);
+      const key = dateKey(new Date(attViewYear, attViewMonth - 1, day));
+      const reason = child ? data.attendance[key]?.[child.id]?.reason : '';
+      alert(`${attViewMonth}월 ${day}일 ${child?.name || ''} 결석 사유\n${reason || '(사유 없음)'}`);
+    });
+  });
+
+  wrap.querySelectorAll('.att-name-link').forEach((th) => {
+    th.addEventListener('click', () => {
+      const cid = th.dataset.child;
+      feesIncludedIds.add(cid);
+      switchTab('fees');
+      document.querySelector(`.fee-card[data-fee-child="${cid}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+}
+
+// 아이별로 그동안 적어온 "금일 서비스 제공내용 및 특이사항"을 날짜순으로 모아서 보여준다.
+function renderJournal() {
+  const nameList = document.getElementById('journalNameList');
+  const detail = document.getElementById('journalDetail');
+  const children = getOwnChildren()
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+
+  if (!children.length) {
+    nameList.innerHTML = '';
+    detail.innerHTML = '<p class="empty-msg">등록된 대상자가 없습니다.</p>';
+    return;
+  }
+
+  if (journalSelectedChildId && !children.some((c) => c.id === journalSelectedChildId)) {
+    journalSelectedChildId = null;
+  }
+
+  nameList.innerHTML = children
+    .map(
+      (c) => `
+    <button type="button" class="journal-name-item ${c.id === journalSelectedChildId ? 'active' : ''}" data-child="${c.id}">
+      ${esc(c.name)}
+    </button>`
+    )
+    .join('');
+
+  nameList.querySelectorAll('.journal-name-item').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      journalSelectedChildId = btn.dataset.child;
+      renderJournal();
+    });
+  });
+
+  if (!journalSelectedChildId) {
+    detail.innerHTML = '<p class="empty-msg">왼쪽에서 아이를 선택해 주세요.</p>';
+    return;
+  }
+
+  const child = children.find((c) => c.id === journalSelectedChildId);
+  const entries = [];
+  Object.keys(data.attendance).forEach((dateStr) => {
+    const record = data.attendance[dateStr]?.[journalSelectedChildId];
+    if (record?.note) entries.push({ date: dateStr, note: record.note });
+  });
+  entries.sort((a, b) => b.date.localeCompare(a.date));
+
+  if (!entries.length) {
+    detail.innerHTML = `
+      <h3>${esc(child.name)}</h3>
+      <p class="empty-msg">기록된 일지가 없습니다.</p>`;
+    return;
+  }
+
+  const rows = entries
+    .map(({ date, note }) => {
+      const d = new Date(date);
+      const label = `${d.getMonth() + 1}/${d.getDate()}`;
+      return `<tr><td>${esc(label)}</td><td>${esc(note)}</td></tr>`;
+    })
+    .join('');
+
+  detail.innerHTML = `
+    <h3>${esc(child.name)}</h3>
+    <div class="payment-table-wrap">
+      <table class="payment-table">
+        <thead><tr><th>날짜</th><th>서비스 제공내용 및 특이사항</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderPasswordSettings() {
+  if (!isAdmin()) return;
+  const list = document.getElementById('passwordList');
+  list.innerHTML = data.teachers
+    .map(
+      (t) => `
+    <div class="card password-row" data-teacher="${esc(t.name)}">
+      <div class="child-name">${esc(t.name)}${t.isAdmin ? ' <span class="badge">관리자</span>' : ''}</div>
+      <div class="password-form">
+        <input type="password" class="pw-input" pattern="[0-9]{4}" maxlength="4" inputmode="numeric"
+          value="${esc(t.password || DEFAULT_PASSWORD)}" placeholder="4자리">
+        <button type="button" class="btn btn-sm btn-primary pw-save">저장</button>
+        ${t.name !== currentUser.name ? '<button type="button" class="btn btn-sm btn-danger teacher-delete">삭제</button>' : ''}
+      </div>
+    </div>`
+    )
+    .join('');
+
+  list.querySelectorAll('.pw-save').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const row = btn.closest('.password-row');
+      const teacherName = row.dataset.teacher;
+      const pw = row.querySelector('.pw-input').value;
+      if (!/^\d{4}$/.test(pw)) {
+        alert('비밀번호는 숫자 4자리여야 합니다.');
+        return;
+      }
+
+      btn.disabled = true;
+      const { error } = await supabaseClient
+        .from('teacher_passwords')
+        .update({ password: pw })
+        .eq('teacher', teacherName);
+      btn.disabled = false;
+
+      if (error) {
+        console.error(error);
+        alert('저장 중 오류가 발생했습니다.');
+        return;
+      }
+
+      const teacher = data.teachers.find((t) => t.name === teacherName);
+      if (teacher) teacher.password = pw;
+      alert(`${teacherName} 선생님 비밀번호가 변경되었습니다.`);
+    });
+  });
+
+  list.querySelectorAll('.teacher-delete').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const row = btn.closest('.password-row');
+      const teacherName = row.dataset.teacher;
+      const hasChildren = data.children.some((c) => c.teacher === teacherName);
+      const confirmMsg = hasChildren
+        ? `${teacherName} 선생님을 삭제할까요? 담당하던 대상자 기록은 그대로 남지만, 더 이상 로그인할 수 없게 됩니다.`
+        : `${teacherName} 선생님을 삭제할까요?`;
+      if (!confirm(confirmMsg)) return;
+
+      btn.disabled = true;
+      const { error } = await supabaseClient.from('teacher_passwords').delete().eq('teacher', teacherName);
+      btn.disabled = false;
+
+      if (error) {
+        console.error(error);
+        alert('삭제 중 오류가 발생했습니다.');
+        return;
+      }
+
+      data.teachers = data.teachers.filter((t) => t.name !== teacherName);
+      populateLoginSelect();
+      populateFormSelects();
+      renderPasswordSettings();
+    });
+  });
+}
+
+init();
