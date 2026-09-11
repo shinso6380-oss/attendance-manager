@@ -304,7 +304,7 @@ function needsCopayField(child) {
 function calculateMonthlyFee(child, sessionCount) {
   const subject = SUBJECTS[child.subject];
   if (!subject) {
-    return { baseTotal: 0, voucherDeduction: 0, voucherDeductionLabels: [], extra6Amount: 0, extra7Amount: 0, extraAmount: 0, additionalPayment: 0, copay: 0, breakdown: [], rate: 0 };
+    return { baseTotal: 0, voucherDeduction: 0, voucherDeductionLabels: [], voucherDeductionItems: [], extra6Amount: 0, extra7Amount: 0, extraAmount: 0, additionalPayment: 0, copay: 0, breakdown: [], rate: 0 };
   }
 
   const rate = subject.rate;
@@ -356,12 +356,25 @@ function calculateMonthlyFee(child, sessionCount) {
   const copay = getCopayAmount(child, sessionCount);
   const additionalPayment = baseTotal - developmentalDeduction - developmentalCopay - otherDeduction;
 
-  // "바우처 차감" 합계가 어떤 바우처들 때문인지 화면에 같이 보여주기 위한 라벨
+  // "바우처 차감" 합계가 어떤 바우처들 때문인지 화면에 같이 보여주기 위한 라벨/개별 금액
   const voucherDeductionLabels = [];
-  if (developmentalDeduction > 0) voucherDeductionLabels.push('발달재활');
-  if (types.includes('edu-therapy')) voucherDeductionLabels.push('치료지원');
-  if (types.includes('edu-afterschool')) voucherDeductionLabels.push('방과 후');
-  if (types.includes('sports')) voucherDeductionLabels.push('스포츠');
+  const voucherDeductionItems = [];
+  if (developmentalDeduction > 0) {
+    voucherDeductionLabels.push('발달재활');
+    voucherDeductionItems.push({ label: '발달재활', amount: developmentalDeduction });
+  }
+  if (types.includes('edu-therapy')) {
+    voucherDeductionLabels.push('치료지원');
+    voucherDeductionItems.push({ label: '치료지원', amount: EDU_VOUCHER_AMOUNTS['edu-therapy'] });
+  }
+  if (types.includes('edu-afterschool')) {
+    voucherDeductionLabels.push('방과 후');
+    voucherDeductionItems.push({ label: '방과 후', amount: EDU_VOUCHER_AMOUNTS['edu-afterschool'] });
+  }
+  if (types.includes('sports')) {
+    voucherDeductionLabels.push('스포츠');
+    voucherDeductionItems.push({ label: '스포츠', amount: SPORTS_VOUCHER_AMOUNT });
+  }
 
   if (copay > 0) {
     breakdown.push(`본인부담금 (별도 납부): ${formatCurrency(copay)}`);
@@ -369,7 +382,7 @@ function calculateMonthlyFee(child, sessionCount) {
 
   breakdown.push(`→ 추가금 납부액: ${formatCurrency(additionalPayment)}`);
 
-  return { baseTotal, voucherDeduction, voucherDeductionLabels, extra6Amount, extra7Amount, extraAmount, additionalPayment, copay, breakdown, rate };
+  return { baseTotal, voucherDeduction, voucherDeductionLabels, voucherDeductionItems, extra6Amount, extra7Amount, extraAmount, additionalPayment, copay, breakdown, rate };
 }
 
 // 담당 과목이 아닌 "다른 과목"의 과목 키를 반환한다 (과목은 심리운동/언어재활 둘뿐이라 그냥 반대쪽을 찾음).
@@ -1760,13 +1773,13 @@ async function captureFeeSummary(childId) {
   // 6·7회차 추가금은 이미 추가납부액 계산에 녹아 있는 설명용 숫자라, 별도 줄로 또 보여주면
   // "추가납부액에 이 만큼이 더 붙는다"로 오해하기 쉬워서 안내 표에서는 뺀다.
   const infoRows = [{ label: '총 금액', sub: basisLabel, value: formatCurrency(fee.baseTotal) }];
-  if (fee.voucherDeduction > 0) {
+  fee.voucherDeductionItems.forEach((item) => {
     infoRows.push({
-      label: `바우처 차감 (${fee.voucherDeductionLabels.join(', ')})`,
-      value: `-${formatCurrency(fee.voucherDeduction)}`,
+      label: `바우처 차감 (${item.label})`,
+      value: `-${formatCurrency(item.amount)}`,
       deduct: true,
     });
-  }
+  });
   if ((feeRec.carryoverAmount || 0) > 0) {
     infoRows.push({ label: '이월 금액 차감', value: `-${formatCurrency(feeRec.carryoverAmount)}`, deduct: true });
   }
