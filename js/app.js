@@ -1540,7 +1540,7 @@ function renderAttendance() {
                 ${isAbsent ? '' : 'disabled'}>
               ${isMakeup ? '<button type="button" class="btn btn-sm btn-danger remove-makeup">제외</button>' : ''}
             </div>
-            <textarea class="service-note" placeholder="금일 서비스 제공내용 및 특이사항">${esc(record.note || '')}</textarea>
+            <textarea class="service-note" placeholder="서비스 제공내용 및 특이사항">${esc(record.note || '')}</textarea>
           </div>`;
         })
         .join('');
