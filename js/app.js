@@ -2294,9 +2294,13 @@ function getPaymentStatus(child, year, month) {
   const sessionCount = feeRec?.sessionCount ?? countSessionsInMonth(year, month, child.days);
   const fee = calculateMonthlyFee(child, sessionCount);
 
-  const needsAdditional = getNetAdditionalPayment(fee, feeRec, child) > 0;
+  const netAdditional = getNetAdditionalPayment(fee, feeRec, child);
+  const needsAdditional = netAdditional > 0;
   const needsCopay = needsCopayField(child) && fee.copay > 0;
-  if (!needsAdditional && !needsCopay) return null;
+  if (!needsAdditional && !needsCopay) {
+    // 바우처 차감이 총 금액보다 많아 추가납부액이 마이너스인 경우 = 다음 달로 이월할 금액이 있다는 뜻
+    return netAdditional < 0 ? 'carryover' : null;
+  }
 
   const additionalOk = !needsAdditional || !!feeRec?.additionalPaid;
   const copayOk = !needsCopay || !!feeRec?.copayPaid;
@@ -2388,7 +2392,9 @@ function renderMonthlyAttendance() {
         ? '<span class="att-payment-badge unpaid">미납</span>'
         : paymentStatus === 'paid'
           ? '<span class="att-payment-badge paid">납부완료</span>'
-          : '';
+          : paymentStatus === 'carryover'
+            ? '<span class="att-payment-badge paid">이월</span>'
+            : '';
       return `<tr><th class="att-name att-name-link" data-child="${c.id}" title="클릭하면 이 아이의 월 수업료 산정으로 이동합니다">${esc(c.name)}<span class="att-count">(${presentCount}회)</span>${badge}</th>${cellsHtml}</tr>`;
     })
     .join('');
