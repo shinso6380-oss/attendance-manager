@@ -657,12 +657,42 @@ body {
   position: sticky;
   left: 0;
   background: var(--bg);
-  z-index: 1;
+  z-index: 2;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: .3rem;
 }
+
+/* 표 자체가 가로 스크롤을 가지고 있으면(overflow-x:auto) CSS 명세상 overflow-y도 자동으로
+   auto가 되어버려서, 이 안의 position:sticky가 페이지가 아니라 이 표 영역 기준으로 고정된다.
+   그래서 아예 이 표 영역 자체를 세로로도 스스로 스크롤되는 영역으로 만들고, 그 안에서
+   날짜/요일 줄이 위에 붙어있게 한다 (표가 너무 길면 표 안에서만 스크롤됨). */
+.monthly-attendance-scroll {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.monthly-attendance-table thead tr:first-child th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg);
+}
+
+.monthly-attendance-table thead tr:last-child th {
+  position: sticky;
+  top: var(--att-header-row1-height, 32px);
+  z-index: 3;
+  background: var(--bg);
+}
+
+.monthly-attendance-table thead tr:first-child th:first-child,
+.monthly-attendance-table thead tr:last-child th:first-child {
+  left: 0;
+  z-index: 4;
+}
+
 
 .monthly-attendance-table .att-name-link {
   cursor: pointer;
