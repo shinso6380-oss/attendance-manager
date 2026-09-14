@@ -2402,7 +2402,7 @@ function renderMonthlyAttendance() {
   const totalRow = `<tr class="att-total-row"><th class="att-name">합계<span class="att-count">(${grandTotal}회)</span></th>${dateList.map(() => '<td></td>').join('')}</tr>`;
 
   wrap.innerHTML = `
-    <div class="payment-table-wrap">
+    <div class="payment-table-wrap monthly-attendance-scroll">
       <table class="schedule-table monthly-attendance-table">
         <thead>
           <tr><th>이름</th>${headerDates}</tr>
@@ -2411,6 +2411,11 @@ function renderMonthlyAttendance() {
         <tbody>${bodyRows}${totalRow}</tbody>
       </table>
     </div>`;
+
+  const firstHeaderRow = wrap.querySelector('.monthly-attendance-table thead tr:first-child');
+  if (firstHeaderRow) {
+    document.documentElement.style.setProperty('--att-header-row1-height', `${firstHeaderRow.offsetHeight}px`);
+  }
 
   wrap.querySelectorAll('.att-absent.has-reason').forEach((td) => {
     td.addEventListener('click', () => {
