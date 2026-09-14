@@ -1793,9 +1793,10 @@ async function captureFeeSummary(childId) {
   }
 
   // 실제로 납부해야 하는 금액만 따로 네모 박스에 모아서 눈에 띄게 보여준다.
-  const payRows = [{ label: '추가납부액', value: formatCurrency(netAdditional) }];
+  // 마이너스(환급 등)인 금액은 바우처 차감과 같은 파란색으로 표시해 구분한다.
+  const payRows = [{ label: '추가납부액', value: formatCurrency(netAdditional), negative: netAdditional < 0 }];
   if (showCopay && fee.copay > 0) {
-    payRows.push({ label: '본인부담금', value: formatCurrency(fee.copay) });
+    payRows.push({ label: '본인부담금', value: formatCurrency(fee.copay), negative: fee.copay < 0 });
   }
 
   const wrap = document.createElement('div');
@@ -1827,7 +1828,7 @@ async function captureFeeSummary(childId) {
           (r) => `
         <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0;">
           <div style="font-size:16px; color:#374151;">${esc(r.label)}</div>
-          <div style="font-size:20px; font-weight:800; color:#111827;">${r.value}</div>
+          <div style="font-size:20px; font-weight:800; color:${r.negative ? '#2563eb' : '#111827'};">${r.value}</div>
         </div>`
         )
         .join('')}
