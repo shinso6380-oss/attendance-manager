@@ -689,6 +689,27 @@ function bindEvents() {
     renderAttendance();
   });
 
+  // 날짜 라벨을 클릭하면 달력이 떠서 원하는 날짜로 바로 이동할 수 있다 (미리 결석 보고받은 날 미리 체크 등).
+  const attDatePicker = document.getElementById('attDatePicker');
+  document.getElementById('todayLabel').addEventListener('click', () => {
+    attDatePicker.value = dateKey(attendanceViewDate);
+    if (attDatePicker.showPicker) {
+      try {
+        attDatePicker.showPicker();
+        return;
+      } catch (e) {
+        // showPicker가 막혀 있는 환경이면 아래 click()으로 대체
+      }
+    }
+    attDatePicker.click();
+  });
+  attDatePicker.addEventListener('change', () => {
+    if (!attDatePicker.value) return;
+    const [y, m, d] = attDatePicker.value.split('-').map(Number);
+    attendanceViewDate = new Date(y, m - 1, d);
+    renderAttendance();
+  });
+
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => switchTab(tab.dataset.tab));
   });
