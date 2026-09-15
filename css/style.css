@@ -134,6 +134,23 @@ body {
   font-size: .9rem;
 }
 
+.today-label-link {
+  cursor: pointer;
+}
+
+.today-label-link:hover {
+  text-decoration: underline;
+  color: var(--primary);
+}
+
+.visually-hidden-date-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .btn {
   padding: .5rem 1rem;
   border: 1px solid var(--border);
