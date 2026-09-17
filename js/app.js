@@ -211,6 +211,29 @@ function attachMoneyInputFormatting(el) {
   });
 }
 
+// 이월 금액 조정처럼 양수/음수 의미가 서로 달라 부호를 항상 명시적으로 보여줘야 하는 입력칸용
+// (양수는 "+50,000원", 음수는 "-50,000원"으로 표시. 0은 부호 없이 "0원")
+function formatSignedCurrency(n) {
+  const num = Number(n) || 0;
+  const sign = num > 0 ? '+' : num < 0 ? '-' : '';
+  return sign + Math.abs(num).toLocaleString('ko-KR') + '원';
+}
+
+function formatSignedMoneyInputValue(n) {
+  return formatSignedCurrency(parseMoneyInputValue(n));
+}
+
+function attachSignedMoneyInputFormatting(el) {
+  el.addEventListener('input', () => {
+    const digits = el.value.replace(/[^\d-]/g, '');
+    if (digits === '' || digits === '-') {
+      el.value = digits;
+      return;
+    }
+    el.value = formatSignedCurrency(Number(digits) || 0);
+  });
+}
+
 function generateTimeOptions(stepMinutes = 10) {
   const options = [];
   for (let m = 0; m < 24 * 60; m += stepMinutes) {
@@ -399,9 +422,10 @@ function getExtraSubjectFee(child, feeRec) {
   return (feeRec?.extraSessionCount || 0) * rate;
 }
 
-// 이월 금액 차감은 추가납부액에서만 반영하고 본인부담금(copay)에는 영향을 주지 않는다.
+// 이월 금액 조정은 추가납부액에서만 반영하고 본인부담금(copay)에는 영향을 주지 않는다.
+// 양수 = 이번 달에 더 받아야 함(가산), 음수 = 이번 달에서 차감.
 function getNetAdditionalPayment(fee, feeRec, child) {
-  return fee.additionalPayment - (feeRec?.carryoverAmount || 0) + getExtraSubjectFee(child, feeRec);
+  return fee.additionalPayment + (feeRec?.carryoverAmount || 0) + getExtraSubjectFee(child, feeRec);
 }
 
 function dateKey(date = new Date()) {
@@ -1802,9 +1826,9 @@ async function captureFeeSummary(childId) {
     });
   });
   if ((feeRec.carryoverAmount || 0) > 0) {
-    infoRows.push({ label: '이월 금액 차감', value: `-${formatCurrency(feeRec.carryoverAmount)}`, deduct: true });
+    infoRows.push({ label: '이월 추가 징수', value: `+${formatCurrency(feeRec.carryoverAmount)}` });
   } else if ((feeRec.carryoverAmount || 0) < 0) {
-    infoRows.push({ label: '이월 추가 징수', value: `+${formatCurrency(-feeRec.carryoverAmount)}` });
+    infoRows.push({ label: '이월 금액 차감', value: `-${formatCurrency(-feeRec.carryoverAmount)}`, deduct: true });
   }
   if (feeRec.extraSubjectEnabled && (feeRec.extraSessionCount || 0) > 0) {
     const otherLabel = SUBJECTS[getOtherSubject(child.subject)]?.label || '';
@@ -2047,8 +2071,8 @@ function renderFees() {
         <div class="fee-input-row">
           <label>이월 금액 조정</label>
           <button type="button" class="btn btn-sm carryover-sign-toggle">±</button>
-          <input type="text" inputmode="numeric" class="carryover-amount money-input" value="${formatMoneyInputValue(feeRec.carryoverAmount || 0)}" placeholder="0원">
-          <span class="text-muted">(양수 = 이번 달에서 차감, 음수 = 이번 달에 더 받아야 함 · 추가납부액에서만 반영, 본인부담금엔 영향 없음)</span>
+          <input type="text" inputmode="numeric" class="carryover-amount" value="${formatSignedMoneyInputValue(feeRec.carryoverAmount || 0)}" placeholder="0원">
+          <span class="text-muted">(양수 = 이번 달에 더 받아야 함, 음수 = 이번 달에서 차감 · 추가납부액에서만 반영, 본인부담금엔 영향 없음)</span>
         </div>
 
         ${paymentTableHtml}
@@ -2126,9 +2150,11 @@ function renderFees() {
       await persistFeeRecord(cid);
     });
 
-    card.querySelector('.carryover-amount')?.addEventListener('change', async (e) => {
+    const carryoverInput = card.querySelector('.carryover-amount');
+    attachSignedMoneyInputFormatting(carryoverInput);
+    carryoverInput?.addEventListener('change', async (e) => {
       getFeeRecord(cid).carryoverAmount = parseMoneyInputValue(e.target.value);
-      e.target.value = formatMoneyInputValue(getFeeRecord(cid).carryoverAmount);
+      e.target.value = formatSignedMoneyInputValue(getFeeRecord(cid).carryoverAmount);
       await persistFeeRecord(cid);
       renderFees();
     });
