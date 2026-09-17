@@ -2153,8 +2153,13 @@ function renderFees() {
     const carryoverInput = card.querySelector('.carryover-amount');
     attachSignedMoneyInputFormatting(carryoverInput);
     carryoverInput?.addEventListener('change', async (e) => {
-      getFeeRecord(cid).carryoverAmount = parseMoneyInputValue(e.target.value);
-      e.target.value = formatSignedMoneyInputValue(getFeeRecord(cid).carryoverAmount);
+      const rec = getFeeRecord(cid);
+      // 금액을 새로 입력할 땐 부호와 상관없이 절댓값만 받고, 이미 정해둔 부호(±로 바꾼 값)를 그대로
+      // 유지한다. 아직 부호를 정한 적 없으면(0에서 새로 입력) 기본값은 음수(차감)로 한다.
+      const magnitude = Math.abs(parseMoneyInputValue(e.target.value));
+      const sign = rec.carryoverAmount > 0 ? 1 : -1;
+      rec.carryoverAmount = magnitude * sign;
+      e.target.value = formatSignedMoneyInputValue(rec.carryoverAmount);
       await persistFeeRecord(cid);
       renderFees();
     });
