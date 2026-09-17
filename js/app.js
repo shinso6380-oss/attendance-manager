@@ -1827,7 +1827,8 @@ async function captureFeeSummary(childId) {
     'position:fixed; left:-9999px; top:0; width:600px; padding:40px; background:#ffffff; box-sizing:border-box; font-family:inherit;';
   wrap.innerHTML = `
     <div style="text-align:center; margin-bottom:24px;">
-      <div style="font-size:22px; font-weight:800; color:#111827;">${esc(child.name)} 이용료 정산 내역 <span style="font-size:19px; font-weight:700; color:#4b5563;">(${feeViewYear}년 ${feeViewMonth}월)</span></div>
+      <div style="font-size:22px; font-weight:800; color:#111827;">${esc(child.name)} 이용료 정산 내역</div>
+      <div style="font-size:19px; font-weight:700; color:#4b5563; margin-top:6px;">${feeViewYear}년 ${feeViewMonth}월</div>
     </div>
     <table style="width:100%; border-collapse:collapse; font-size:16px;">
       ${infoRows
