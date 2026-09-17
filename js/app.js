@@ -510,6 +510,7 @@ let feeViewYear = new Date().getFullYear();
 let feeViewMonth = new Date().getMonth() + 1;
 let attViewYear = new Date().getFullYear();
 let attViewMonth = new Date().getMonth() + 1;
+let attSortMode = 'day'; // 월 출석부 정렬 기준: day(요일순, 기본) / name(이름순) / payment(납부 여부순)
 let historyChildId = null;
 let historyYear = new Date().getFullYear();
 let extraChildIdsByDate = {};
@@ -797,6 +798,10 @@ function bindEvents() {
   document.getElementById('attNextMonth').addEventListener('click', () => {
     attViewMonth++;
     if (attViewMonth > 12) { attViewMonth = 1; attViewYear++; }
+    renderMonthlyAttendance();
+  });
+  document.getElementById('attSortSelect').addEventListener('change', (e) => {
+    attSortMode = e.target.value;
     renderMonthlyAttendance();
   });
 
@@ -1870,15 +1875,17 @@ async function captureFeeSummary(childId) {
     </table>
     <div style="margin-top:20px; border:2px solid #111827; border-radius:12px; padding:16px 20px;">
       <div style="font-size:14px; font-weight:700; color:#111827; margin-bottom:10px;">💰 납부하실 금액</div>
-      ${payRows
-        .map(
-          (r) => `
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0;">
-          <div style="font-size:16px; color:#374151;">${esc(r.label)}</div>
-          <div style="font-size:20px; font-weight:800; color:${r.negative ? '#2563eb' : '#111827'};">${r.value}</div>
-        </div>`
-        )
-        .join('')}
+      <table style="width:100%; border-collapse:collapse;">
+        ${payRows
+          .map(
+            (r, i) => `
+          <tr>
+            <td style="padding:8px 0; font-size:16px; color:#374151; ${i < payRows.length - 1 ? 'border-bottom:1px solid #e5e7eb;' : ''}">${esc(r.label)}</td>
+            <td style="padding:8px 0; text-align:right; font-size:20px; font-weight:800; color:${r.negative ? '#2563eb' : '#111827'}; ${i < payRows.length - 1 ? 'border-bottom:1px solid #e5e7eb;' : ''}">${r.value}</td>
+          </tr>`
+          )
+          .join('')}
+      </table>
     </div>
     <div style="margin-top:18px;">
       ${accountNotes
@@ -2415,10 +2422,29 @@ function computeMonthlyAttendanceData(year, month) {
   return { rows, dateList, grandTotal };
 }
 
+// 요일순(기본) 외에 이름순 / 납부 여부순으로도 볼 수 있게 정렬한다.
+function sortAttendanceRows(rows, mode) {
+  if (mode === 'name') {
+    return [...rows].sort((a, b) => a.child.name.localeCompare(b.child.name, 'ko'));
+  }
+  if (mode === 'payment') {
+    const priority = { unpaid: 0, carryover: 1, paid: 2 };
+    return [...rows].sort((a, b) => {
+      const pa = priority[a.paymentStatus] ?? 3;
+      const pb = priority[b.paymentStatus] ?? 3;
+      if (pa !== pb) return pa - pb;
+      return a.child.name.localeCompare(b.child.name, 'ko');
+    });
+  }
+  return rows;
+}
+
 function renderMonthlyAttendance() {
   document.getElementById('attMonthLabel').textContent = `${attViewYear}년 ${attViewMonth}월`;
+  document.getElementById('attSortSelect').value = attSortMode;
   const wrap = document.getElementById('monthlyAttendanceTableWrap');
-  const { rows, dateList, grandTotal } = computeMonthlyAttendanceData(attViewYear, attViewMonth);
+  const { rows: rawRows, dateList, grandTotal } = computeMonthlyAttendanceData(attViewYear, attViewMonth);
+  const rows = sortAttendanceRows(rawRows, attSortMode);
 
   if (!rows.length) {
     wrap.innerHTML = '<p class="empty-msg">등록된 대상자가 없습니다.</p>';
