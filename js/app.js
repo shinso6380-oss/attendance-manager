@@ -1803,6 +1803,8 @@ async function captureFeeSummary(childId) {
   });
   if ((feeRec.carryoverAmount || 0) > 0) {
     infoRows.push({ label: '이월 금액 차감', value: `-${formatCurrency(feeRec.carryoverAmount)}`, deduct: true });
+  } else if ((feeRec.carryoverAmount || 0) < 0) {
+    infoRows.push({ label: '이월 추가 징수', value: `+${formatCurrency(-feeRec.carryoverAmount)}` });
   }
   if (feeRec.extraSubjectEnabled && (feeRec.extraSessionCount || 0) > 0) {
     const otherLabel = SUBJECTS[getOtherSubject(child.subject)]?.label || '';
@@ -1825,8 +1827,7 @@ async function captureFeeSummary(childId) {
     'position:fixed; left:-9999px; top:0; width:600px; padding:40px; background:#ffffff; box-sizing:border-box; font-family:inherit;';
   wrap.innerHTML = `
     <div style="text-align:center; margin-bottom:24px;">
-      <div style="font-size:22px; font-weight:800; color:#111827;">${esc(child.name)} 이용료 정산 내역</div>
-      <div style="font-size:15px; color:#6b7280; margin-top:4px;">${feeViewYear}년 ${feeViewMonth}월</div>
+      <div style="font-size:22px; font-weight:800; color:#111827;">${esc(child.name)} 이용료 정산 내역 <span style="font-size:19px; font-weight:700; color:#4b5563;">(${feeViewYear}년 ${feeViewMonth}월)</span></div>
     </div>
     <table style="width:100%; border-collapse:collapse; font-size:16px;">
       ${infoRows
@@ -2043,9 +2044,10 @@ function renderFees() {
         </div>
 
         <div class="fee-input-row">
-          <label>이월 금액 차감</label>
+          <label>이월 금액 조정</label>
+          <button type="button" class="btn btn-sm carryover-sign-toggle">±</button>
           <input type="text" inputmode="numeric" class="carryover-amount money-input" value="${formatMoneyInputValue(feeRec.carryoverAmount || 0)}" placeholder="0원">
-          <span class="text-muted">(추가납부액에서만 차감, 본인부담금엔 영향 없음)</span>
+          <span class="text-muted">(양수 = 이번 달에서 차감, 음수 = 이번 달에 더 받아야 함 · 추가납부액에서만 반영, 본인부담금엔 영향 없음)</span>
         </div>
 
         ${paymentTableHtml}
@@ -2126,6 +2128,13 @@ function renderFees() {
     card.querySelector('.carryover-amount')?.addEventListener('change', async (e) => {
       getFeeRecord(cid).carryoverAmount = parseMoneyInputValue(e.target.value);
       e.target.value = formatMoneyInputValue(getFeeRecord(cid).carryoverAmount);
+      await persistFeeRecord(cid);
+      renderFees();
+    });
+
+    card.querySelector('.carryover-sign-toggle')?.addEventListener('click', async () => {
+      const rec = getFeeRecord(cid);
+      rec.carryoverAmount = -(rec.carryoverAmount || 0);
       await persistFeeRecord(cid);
       renderFees();
     });
