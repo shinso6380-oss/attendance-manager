@@ -2460,7 +2460,8 @@ function renderMonthlyAttendance() {
   wrap.querySelectorAll('.att-name-link').forEach((th) => {
     th.addEventListener('click', () => {
       const cid = th.dataset.child;
-      feesIncludedIds.add(cid);
+      // 이전에 클릭했던 다른 아이들은 안 보이게, 지금 클릭한 아이만 보이게 한다.
+      feesIncludedIds = new Set([cid]);
       switchTab('fees');
       document.querySelector(`.fee-card[data-fee-child="${cid}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
