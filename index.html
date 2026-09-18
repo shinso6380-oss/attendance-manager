@@ -58,6 +58,7 @@
         <button class="tab" data-tab="monthlyAttendance">월 출석부</button>
         <button class="tab" data-tab="schedule">시간표</button>
         <button class="tab" data-tab="children">대상자 관리</button>
+        <button class="tab hidden" data-tab="deposits" id="tabDeposits">본인부담금 관리</button>
         <button class="tab hidden" data-tab="settings" id="tabSettings">선생님 관리</button>
       </nav>
     </header>
@@ -166,6 +167,39 @@
         </div>
       </section>
 
+      <section id="deposits" class="panel">
+        <div class="panel-header">
+          <h2>본인부담금 관리</h2>
+        </div>
+        <p class="deposit-intro">은행에서 받은 입금내역 파일(경남은행 인터넷뱅킹 거래내역조회, .xls/.xlsx/.csv)을 올리면 등록된 입금자명과 자동으로 대조합니다. 신용카드·울산페이 등으로 낸 추가금은 여기서 잡히지 않으니 기존처럼 월 수업료 산정 탭에서 수동으로 체크해 주세요.</p>
+
+        <div class="teacher-add-row">
+          <input type="file" id="depositFileInput" accept=".xls,.xlsx,.csv">
+          <button type="button" class="btn btn-sm btn-primary" id="btnUploadDeposits">입금내역 업로드</button>
+          <span id="depositUploadStatus" class="deposit-upload-status"></span>
+        </div>
+
+        <div class="deposit-section-block">
+          <h3>미확인 입금 <span id="depositUnmatchedCount" class="badge"></span></h3>
+          <div id="depositUnmatchedList" class="deposit-list"></div>
+        </div>
+
+        <div class="deposit-section-block">
+          <div class="panel-header">
+            <h3>미납자 명단 (본인부담금)</h3>
+            <div class="month-picker">
+              <button class="btn btn-icon" id="depositPrevMonth">◀</button>
+              <span id="depositMonthLabel"></span>
+              <button class="btn btn-icon" id="depositNextMonth">▶</button>
+            </div>
+          </div>
+          <div class="att-actions no-print">
+            <button class="btn btn-sm" id="btnExportUnpaidExcel">엑셀 다운로드</button>
+          </div>
+          <div id="depositUnpaidList" class="deposit-list"></div>
+        </div>
+      </section>
+
       <section id="settings" class="panel">
         <div class="panel-header">
           <h2>선생님 관리</h2>
@@ -214,6 +248,10 @@
           <legend>결제 구분 (중복 선택 가능)</legend>
           <div class="day-checkboxes" id="paymentTypeCheckboxes"></div>
         </fieldset>
+        <label class="field field-full">
+          <span>예상 입금자명 (본인부담금 자동 매칭용, 쉼표로 구분)</span>
+          <input type="text" name="depositorNames" placeholder="예: 김서연맘, 김서연아빠 (아이 이름은 자동으로 포함됩니다)">
+        </label>
         <div class="field field-full" id="developmentalSubField" hidden>
           <span>발달바우처 형별 (본인부담금)</span>
           <div id="developmentalSubOptions" class="radio-group"></div>

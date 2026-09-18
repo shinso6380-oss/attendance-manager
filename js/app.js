@@ -483,6 +483,7 @@ function rowToChild(row) {
     infantSub: row.infant_sub || '',
     days,
     dayTimes,
+    depositorNames: row.depositor_names || [],
     createdAt: row.created_at || null,
   };
 }
@@ -500,6 +501,7 @@ function childToRow(child) {
     days,
     day_times: child.dayTimes || {},
     class_time: days.length ? child.dayTimes[days[0]] : null,
+    depositor_names: child.depositorNames || [],
   };
 }
 
@@ -519,6 +521,10 @@ let openTeacherGroups = new Set(); // 대상자 관리에서 펼쳐놓은 선생
 let journalSelectedChildId = null;
 let attendanceViewDate = new Date();
 let feesIncludedIds = new Set(); // 기본값: 아무도 선택 안 됨 (필요한 친구만 직접 선택)
+let depositViewYear = new Date().getFullYear();
+let depositViewMonth = new Date().getMonth() + 1;
+let depositRows = [];
+let depositsLoaded = false;
 
 const loadingScreen = document.getElementById('loadingScreen');
 const loginScreen = document.getElementById('loginScreen');
@@ -617,6 +623,7 @@ function showApp() {
   document.getElementById('userLabel').textContent =
     `${currentUser.name}${isAdmin() ? ' (관리자)' : ''}`;
   document.getElementById('tabSettings').classList.toggle('hidden', !isAdmin());
+  document.getElementById('tabDeposits').classList.toggle('hidden', !isAdmin());
   renderAll();
 }
 
@@ -789,6 +796,26 @@ function bindEvents() {
     if (feeViewMonth > 12) { feeViewMonth = 1; feeViewYear++; }
     renderFees();
   });
+
+  document.getElementById('depositPrevMonth').addEventListener('click', () => {
+    depositViewMonth--;
+    if (depositViewMonth < 1) { depositViewMonth = 12; depositViewYear--; }
+    renderDeposits();
+  });
+  document.getElementById('depositNextMonth').addEventListener('click', () => {
+    depositViewMonth++;
+    if (depositViewMonth > 12) { depositViewMonth = 1; depositViewYear++; }
+    renderDeposits();
+  });
+  document.getElementById('btnUploadDeposits').addEventListener('click', () => {
+    const fileInput = document.getElementById('depositFileInput');
+    if (!fileInput.files.length) {
+      alert('업로드할 파일을 선택해 주세요.');
+      return;
+    }
+    handleDepositFileUpload(fileInput.files[0]);
+  });
+  document.getElementById('btnExportUnpaidExcel').addEventListener('click', exportUnpaidCopayExcel);
 
   document.getElementById('attPrevMonth').addEventListener('click', () => {
     attViewMonth--;
@@ -1221,6 +1248,10 @@ function switchTab(name) {
   if (name === 'fees') renderFees();
   if (name === 'monthlyAttendance') renderMonthlyAttendance();
   if (name === 'journal') renderJournal();
+  if (name === 'deposits') {
+    renderDeposits();
+    loadDeposits().then(renderDeposits);
+  }
   if (name === 'settings') renderPasswordSettings();
 }
 
@@ -1281,6 +1312,7 @@ function openChildModal(child = null) {
   if (child) {
     childForm.querySelector('[name="name"]').value = child.name;
     childForm.querySelector('[name="birthDate"]').value = child.birthDate || '';
+    childForm.querySelector('[name="depositorNames"]').value = (child.depositorNames || []).join(', ');
     teacherSel.value = child.teacher;
     populateSubjectSelect(child.teacher);
     childForm.querySelector('[name="subject"]').value = child.subject;
@@ -1348,6 +1380,11 @@ async function handleChildSubmit(e) {
   // teacherSelect가 잠겨 있으면(신규 등록 전체 / 비관리자 수정) FormData에 값이 실리지 않으므로 본인으로 대체한다.
   let teacher = fd.get('teacher') || currentUser.name;
 
+  const depositorNames = String(fd.get('depositorNames') || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   const child = {
     name: fd.get('name').trim(),
     birthDate: fd.get('birthDate') || '',
@@ -1359,6 +1396,7 @@ async function handleChildSubmit(e) {
     infantSub: paymentTypes.includes('infant') ? infantSub : '',
     dayTimes,
     days: Object.keys(dayTimes).map(Number),
+    depositorNames,
   };
 
   const submitBtn = childForm.querySelector('.modal-footer .btn-primary');
@@ -1750,12 +1788,12 @@ function renderAttendance() {
   });
 }
 
-function getFeeRecord(childId) {
-  const mk = monthKey(feeViewYear, feeViewMonth);
+function getOrCreateFeeRecordForMonth(childId, year, month) {
+  const mk = monthKey(year, month);
   if (!data.monthlyFees[mk]) data.monthlyFees[mk] = {};
   if (!data.monthlyFees[mk][childId]) {
     const child = data.children.find((c) => c.id === childId);
-    const auto = child ? countSessionsInMonth(feeViewYear, feeViewMonth, child.days) : 0;
+    const auto = child ? countSessionsInMonth(year, month, child.days) : 0;
     data.monthlyFees[mk][childId] = {
       sessionCount: auto,
       additionalDepositDate: '',
@@ -1774,9 +1812,13 @@ function getFeeRecord(childId) {
   return data.monthlyFees[mk][childId];
 }
 
-async function persistFeeRecord(childId) {
-  const mk = monthKey(feeViewYear, feeViewMonth);
-  const rec = getFeeRecord(childId);
+function getFeeRecord(childId) {
+  return getOrCreateFeeRecordForMonth(childId, feeViewYear, feeViewMonth);
+}
+
+async function persistFeeRecordForMonth(childId, year, month) {
+  const mk = monthKey(year, month);
+  const rec = getOrCreateFeeRecordForMonth(childId, year, month);
   const { error } = await supabaseClient.from('monthly_fees').upsert(
     {
       child_id: childId,
@@ -1800,9 +1842,349 @@ async function persistFeeRecord(childId) {
     console.error(error);
     alert('수업료 정보 저장 중 오류가 발생했습니다.');
   }
+  return !error;
+}
+
+async function persistFeeRecord(childId) {
+  return persistFeeRecordForMonth(childId, feeViewYear, feeViewMonth);
 }
 
 const persistFeeRecordDebounced = debounce(persistFeeRecord, 600);
+
+// ---- 본인부담금 입금내역 업로드 · 매칭 ----
+
+const DEPOSIT_NOISE_KEYWORDS = ['급여', '국민연금', '고용보험', '산재보험', '국민건강', '국세', '지방세', '임대료', '렌탈', '이익금', '정부', '법인세', '통신비', '전기요금', '보험'];
+const DEPOSIT_NOISE_MAX_AMOUNT = 500000;
+
+function isLikelyNoiseDeposit(depositorRaw, amount) {
+  if (amount >= DEPOSIT_NOISE_MAX_AMOUNT) return true;
+  return DEPOSIT_NOISE_KEYWORDS.some((kw) => depositorRaw.includes(kw));
+}
+
+// 이름 정리에 쓰는 공통 문자 클래스 (반각·전각 구두점, 공백류 포함)
+const NAME_STRIP_RE = /[.·・．，,\s]/g;
+
+// 입금자명 원문에서 붙은 월(예: "9월", "０９월"), 괄호 안 내용, 공백 등을 제거해 순수 이름만 남긴다.
+// 월 표기가 있었으면 그 달을 힌트로 같이 돌려준다 (본인부담금을 반영할 달을 추천하는 데 사용).
+function normalizeDepositorName(raw) {
+  let s = String(raw || '').trim().replace(/　/g, ' ').trim();
+  let hintedMonth = null;
+  const monthMatch = s.match(/([0-9０-９]{1,2})\s*월/);
+  if (monthMatch) {
+    const num = monthMatch[1].replace(/[０-９]/g, (ch) => String(ch.charCodeAt(0) - 0xff10));
+    hintedMonth = Number(num);
+    s = s.replace(monthMatch[0], '');
+  }
+  s = s.replace(/[（(].*?[)）]/g, '');
+  s = s.replace(/바우처/g, '');
+  s = s.replace(NAME_STRIP_RE, '');
+  return { clean: s, hintedMonth };
+}
+
+// 본인부담금 대상 아이들 중, 이름 또는 등록된 입금자명이 정제된 문자열과 정확히 일치하는 아이를 찾는다.
+// 정확히 1명이면 자동 매칭, 0명/2명 이상이면 사람이 확인해야 하므로 null을 돌려준다.
+function findUniqueMatchingChild(cleanName) {
+  if (!cleanName) return null;
+  const candidates = data.children.filter((c) => {
+    if (!needsCopayField(c)) return false;
+    const names = [c.name, ...(c.depositorNames || [])].map((n) => n.replace(NAME_STRIP_RE, ''));
+    return names.includes(cleanName);
+  });
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+async function loadDeposits() {
+  const { data: rows, error } = await supabaseClient.from('deposits').select('*').order('txn_datetime', { ascending: false });
+  if (error) {
+    console.error(error);
+    depositRows = [];
+    depositsLoaded = 'error';
+    return;
+  }
+  depositRows = rows || [];
+  depositsLoaded = true;
+}
+
+// 확정된 입금을 해당 학생의 그 달 본인부담금에 누적 반영한다 (분납 대응). 누적액이 예상 본인부담금 이상이면 입금 완료로 자동 체크.
+async function applyDepositToFee(childId, year, month, amount, txnDate) {
+  const rec = getOrCreateFeeRecordForMonth(childId, year, month);
+  rec.copayAmount = (rec.copayAmount || 0) + amount;
+  if (!rec.copayDepositDate) rec.copayDepositDate = txnDate;
+  const child = data.children.find((c) => c.id === childId);
+  if (child) {
+    const fee = calculateMonthlyFee(child, rec.sessionCount);
+    if (fee.copay > 0 && rec.copayAmount >= fee.copay) rec.copayPaid = true;
+  }
+  await persistFeeRecordForMonth(childId, year, month);
+}
+
+function targetMonthForDeposit(txnDateStr, hintedMonth) {
+  const [txnYear] = txnDateStr.split('-').map(Number);
+  if (hintedMonth) return { year: txnYear, month: hintedMonth };
+  const [y, m] = txnDateStr.split('-').map(Number);
+  return { year: y, month: m };
+}
+
+async function markDepositMatched(depositRow, childId, year, month) {
+  const mk = monthKey(year, month);
+  const { error } = await supabaseClient
+    .from('deposits')
+    .update({ status: 'matched', matched_child_id: childId, matched_month_key: mk })
+    .eq('id', depositRow.id);
+  if (error) {
+    console.error(error);
+    alert('입금 매칭 반영 중 오류가 발생했습니다.');
+    return false;
+  }
+  depositRow.status = 'matched';
+  depositRow.matched_child_id = childId;
+  depositRow.matched_month_key = mk;
+  await applyDepositToFee(childId, year, month, Number(depositRow.amount), depositRow.txn_date);
+  return true;
+}
+
+async function ignoreDeposit(depositId) {
+  const { error } = await supabaseClient.from('deposits').update({ status: 'ignored' }).eq('id', depositId);
+  if (error) {
+    console.error(error);
+    alert('제외 처리 중 오류가 발생했습니다.');
+    return;
+  }
+  const row = depositRows.find((d) => d.id === depositId);
+  if (row) row.status = 'ignored';
+  renderDeposits();
+}
+
+async function assignDepositManually(depositId, childId, monthValue) {
+  const row = depositRows.find((d) => d.id === depositId);
+  if (!row || !childId) return;
+  const [year, month] = monthValue.split('-').map(Number);
+  await markDepositMatched(row, childId, year, month);
+  renderDeposits();
+  renderFees();
+}
+
+// 은행 엑셀/CSV를 읽어 "적요"/"입금금액" 등의 헤더가 있는 행을 찾고, 입금(출금 아님) 행만 골라낸다.
+function parseDepositWorkbook(workbook) {
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+
+  let headerIdx = -1;
+  let col = {};
+  for (let i = 0; i < grid.length; i++) {
+    const row = grid[i].map((v) => String(v ?? '').trim());
+    const dateCol = row.findIndex((v) => /거래일/.test(v));
+    const nameCol = row.findIndex((v) => /적요|내용/.test(v));
+    const amountCol = row.findIndex((v) => /입금/.test(v));
+    if (dateCol >= 0 && nameCol >= 0 && amountCol >= 0) {
+      headerIdx = i;
+      col = { date: dateCol, name: nameCol, amount: amountCol };
+      break;
+    }
+  }
+  if (headerIdx < 0) throw new Error('입금내역 파일에서 거래일시/적요/입금금액 컬럼을 찾지 못했습니다.');
+
+  const results = [];
+  for (let i = headerIdx + 1; i < grid.length; i++) {
+    const row = grid[i];
+    const amountRaw = String(row[col.amount] ?? '').replace(/,/g, '').trim();
+    const amount = Number(amountRaw);
+    if (!amountRaw || !Number.isFinite(amount) || amount <= 0) continue;
+    const depositorRaw = String(row[col.name] ?? '').trim();
+    if (!depositorRaw) continue;
+    const datetimeRaw = String(row[col.date] ?? '').trim();
+    const txnDate = datetimeRaw.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(txnDate)) continue;
+    results.push({
+      txn_date: txnDate,
+      txn_datetime: datetimeRaw,
+      depositor_raw: depositorRaw,
+      amount,
+      source_key: `${datetimeRaw}|${depositorRaw}|${amount}`,
+    });
+  }
+  return results;
+}
+
+async function handleDepositFileUpload(file) {
+  const statusEl = document.getElementById('depositUploadStatus');
+  statusEl.textContent = '읽는 중...';
+  try {
+    const buf = await file.arrayBuffer();
+    const workbook = XLSX.read(buf, { type: 'array' });
+    const parsed = parseDepositWorkbook(workbook);
+
+    const existingKeys = new Set(depositRows.map((d) => d.source_key));
+    const newRows = parsed.filter((r) => !existingKeys.has(r.source_key));
+
+    if (!newRows.length) {
+      statusEl.textContent = `새로운 거래가 없습니다. (파일 내 ${parsed.length}건 모두 이미 업로드됨)`;
+      return;
+    }
+
+    const rowsToInsert = newRows.map((r) => ({
+      ...r,
+      status: isLikelyNoiseDeposit(r.depositor_raw, r.amount) ? 'ignored' : 'unmatched',
+      uploaded_by: currentUser?.name || null,
+    }));
+
+    const { data: inserted, error } = await supabaseClient
+      .from('deposits')
+      .upsert(rowsToInsert, { onConflict: 'source_key', ignoreDuplicates: true })
+      .select();
+    if (error) throw error;
+
+    depositRows.push(...(inserted || []));
+
+    let autoMatched = 0;
+    for (const row of inserted || []) {
+      if (row.status !== 'unmatched') continue;
+      const { clean, hintedMonth } = normalizeDepositorName(row.depositor_raw);
+      const child = findUniqueMatchingChild(clean);
+      if (!child) continue;
+      const { year, month } = targetMonthForDeposit(row.txn_date, hintedMonth);
+      const ok = await markDepositMatched(row, child.id, year, month);
+      if (ok) autoMatched++;
+    }
+
+    statusEl.textContent = `${newRows.length}건 추가 (자동 매칭 ${autoMatched}건, 확인 필요 ${newRows.length - autoMatched}건)`;
+    renderDeposits();
+    renderFees();
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = '';
+    alert('입금내역 파일을 처리하는 중 오류가 발생했습니다. 파일 형식을 확인해 주세요.');
+  }
+}
+
+function renderDeposits() {
+  document.getElementById('depositMonthLabel').textContent = `${depositViewYear}년 ${depositViewMonth}월`;
+
+  const copayChildren = data.children.filter(needsCopayField).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+
+  // 미납자 명단은 children/monthly_fees만으로 계산되므로, deposits 테이블 마이그레이션 전에도 항상 보여준다.
+  if (depositsLoaded === 'error') {
+    document.getElementById('depositUnmatchedList').innerHTML =
+      '<p class="empty-msg">deposits 테이블이 없습니다. sql/2026-09-18-deposit-matching.sql을 Supabase SQL Editor에서 먼저 실행해 주세요.</p>';
+    document.getElementById('depositUnmatchedCount').textContent = '';
+    renderUnpaidCopayList(copayChildren);
+    return;
+  }
+
+  const childOptionsHtml = copayChildren.map((c) => `<option value="${c.id}">${esc(c.name)} (${esc(c.teacher)})</option>`).join('');
+
+  const unmatched = depositRows.filter((d) => d.status === 'unmatched').sort((a, b) => (a.txn_datetime < b.txn_datetime ? 1 : -1));
+  document.getElementById('depositUnmatchedCount').textContent = unmatched.length ? String(unmatched.length) : '';
+
+  const unmatchedListEl = document.getElementById('depositUnmatchedList');
+  if (!unmatched.length) {
+    unmatchedListEl.innerHTML = '<p class="empty-msg">확인이 필요한 입금이 없습니다.</p>';
+  } else {
+    unmatchedListEl.innerHTML = unmatched
+      .map((d) => {
+        const defaultMonth = normalizeDepositorName(d.depositor_raw).hintedMonth
+          ? targetMonthForDeposit(d.txn_date, normalizeDepositorName(d.depositor_raw).hintedMonth)
+          : targetMonthForDeposit(d.txn_date, null);
+        const monthValue = monthKey(defaultMonth.year, defaultMonth.month);
+        return `
+        <div class="deposit-row" data-deposit-id="${d.id}">
+          <div class="deposit-row-main">
+            <span class="deposit-date">${esc(d.txn_date)}</span>
+            <span class="deposit-name">${esc(d.depositor_raw)}</span>
+            <span class="deposit-amount">${formatCurrency(d.amount)}</span>
+          </div>
+          <div class="deposit-row-actions">
+            <select class="deposit-assign-select">
+              <option value="">학생 선택</option>
+              ${childOptionsHtml}
+            </select>
+            <input type="month" class="deposit-month-input" value="${monthValue}">
+            <button type="button" class="btn btn-sm btn-primary deposit-assign-btn">배정</button>
+            <button type="button" class="btn btn-sm deposit-ignore-btn">제외</button>
+          </div>
+        </div>`;
+      })
+      .join('');
+
+    unmatchedListEl.querySelectorAll('.deposit-assign-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const row = btn.closest('.deposit-row');
+        const depositId = Number(row.dataset.depositId);
+        const childId = row.querySelector('.deposit-assign-select').value;
+        const monthValue = row.querySelector('.deposit-month-input').value;
+        if (!childId) {
+          alert('학생을 선택해 주세요.');
+          return;
+        }
+        assignDepositManually(depositId, childId, monthValue);
+      });
+    });
+    unmatchedListEl.querySelectorAll('.deposit-ignore-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const row = btn.closest('.deposit-row');
+        ignoreDeposit(Number(row.dataset.depositId));
+      });
+    });
+  }
+
+  renderUnpaidCopayList(copayChildren);
+}
+
+function getUnpaidCopayRows(copayChildren) {
+  return copayChildren
+    .map((c) => {
+      const feeRec = getOrCreateFeeRecordForMonth(c.id, depositViewYear, depositViewMonth);
+      const fee = calculateMonthlyFee(c, feeRec.sessionCount);
+      return { child: c, feeRec, fee };
+    })
+    .filter(({ fee, feeRec }) => fee.copay > 0 && !feeRec.copayPaid);
+}
+
+function renderUnpaidCopayList(copayChildren) {
+  const rows = getUnpaidCopayRows(copayChildren);
+  const listEl = document.getElementById('depositUnpaidList');
+  if (!rows.length) {
+    listEl.innerHTML = '<p class="empty-msg">미납자가 없습니다.</p>';
+    return;
+  }
+  listEl.innerHTML = `
+    <div class="payment-table-wrap">
+      <table class="payment-table">
+        <thead><tr><th>이름</th><th>담당 선생님</th><th>예상 본인부담금</th><th>입금액</th></tr></thead>
+        <tbody>
+          ${rows
+            .map(
+              ({ child, feeRec, fee }) => `
+            <tr>
+              <td>${esc(child.name)}</td>
+              <td>${esc(child.teacher)}</td>
+              <td class="amount">${formatCurrency(fee.copay)}</td>
+              <td class="amount">${formatCurrency(feeRec.copayAmount || 0)}</td>
+            </tr>`
+            )
+            .join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function exportUnpaidCopayExcel() {
+  const copayChildren = data.children.filter(needsCopayField).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  const rows = getUnpaidCopayRows(copayChildren);
+  if (!rows.length) {
+    alert('미납자가 없습니다.');
+    return;
+  }
+  const aoa = [['이름', '담당 선생님', '예상 본인부담금', '입금액']];
+  rows.forEach(({ child, feeRec, fee }) => {
+    aoa.push([child.name, child.teacher, fee.copay, feeRec.copayAmount || 0]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '미납자명단');
+  XLSX.writeFile(wb, `${depositViewYear}년 ${depositViewMonth}월 본인부담금 미납자명단.xlsx`);
+}
 
 // 학부모에게 카톡 등으로 보내기 좋게, 이용료 정산 내역만 깔끔하게 1:1 정사각형 이미지로 캡쳐한다.
 async function captureFeeSummary(childId) {
