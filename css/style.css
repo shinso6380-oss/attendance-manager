@@ -143,6 +143,15 @@ body {
   color: var(--primary);
 }
 
+.holiday-badge {
+  background: #fee2e2;
+  color: #991b1b;
+  font-weight: 700;
+  font-size: .8rem;
+  padding: .3rem .6rem;
+  border-radius: 999px;
+}
+
 .visually-hidden-date-input {
   position: absolute;
   width: 1px;
@@ -788,6 +797,20 @@ body {
 
 .monthly-attendance-table .att-noclass {
   background: #f8fafc;
+}
+
+.monthly-attendance-table .holiday-col {
+  background: #fef2f2 !important;
+}
+
+.monthly-attendance-table thead .holiday-col {
+  color: #b91c1c;
+}
+
+.monthly-attendance-table .att-empty.holiday-col {
+  color: #b91c1c;
+  font-size: .65rem;
+  font-weight: 600;
 }
 
 .monthly-attendance-table .att-empty {

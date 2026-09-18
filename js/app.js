@@ -1557,6 +1557,7 @@ function renderAttendance() {
   const isToday = dateKey(new Date()) === key;
 
   document.getElementById('todayLabel').textContent = formatDateKR(viewDate) + (isToday ? ' (오늘)' : '');
+  document.getElementById('attHolidayBadge').classList.toggle('hidden', !isKoreanHoliday(viewDate));
 
   if (!data.attendance[key]) data.attendance[key] = {};
   if (!extraChildIdsByDate[key]) extraChildIdsByDate[key] = [];
@@ -2783,18 +2784,20 @@ function computeMonthlyAttendanceData(year, month) {
   const rows = children.map((c) => {
     let presentCount = 0;
     const cells = dateList.map((d) => {
-      const dow = new Date(year, month - 1, d).getDay();
+      const date = new Date(year, month - 1, d);
+      const dow = date.getDay();
       const isScheduled = c.days.includes(dow);
-      const key = dateKey(new Date(year, month - 1, d));
+      const key = dateKey(date);
       const record = data.attendance[key]?.[c.id];
-      if (!record || !record.status) return { type: isScheduled ? 'empty' : 'noclass' };
+      const isHoliday = isKoreanHoliday(date);
+      if (!record || !record.status) return { type: isScheduled ? 'empty' : 'noclass', isHoliday };
       const isMakeup = !isScheduled;
       if (record.status === 'present') {
         const count = record.count ?? 1;
         presentCount += count;
-        return { type: 'present', isMakeup, count };
+        return { type: 'present', isMakeup, count, isHoliday };
       }
-      return { type: 'absent', reason: record.reason || '', isMakeup };
+      return { type: 'absent', reason: record.reason || '', isMakeup, isHoliday };
     });
     grandTotal += presentCount;
     const paymentStatus = getPaymentStatus(c, year, month);
@@ -2833,11 +2836,14 @@ function renderMonthlyAttendance() {
     return;
   }
 
-  const headerDates = dateList.map((d) => `<th>${d}</th>`).join('');
+  const isHolidayDate = (d) => isKoreanHoliday(new Date(attViewYear, attViewMonth - 1, d));
+  const headerDates = dateList
+    .map((d) => `<th class="${isHolidayDate(d) ? 'holiday-col' : ''}">${d}</th>`)
+    .join('');
   const headerDays = dateList
     .map((d) => {
       const dow = new Date(attViewYear, attViewMonth - 1, d).getDay();
-      return `<th class="weekday-th">${WEEKDAY_LABELS[dow]}</th>`;
+      return `<th class="weekday-th${isHolidayDate(d) ? ' holiday-col' : ''}">${WEEKDAY_LABELS[dow]}</th>`;
     })
     .join('');
 
@@ -2845,17 +2851,18 @@ function renderMonthlyAttendance() {
     .map(({ child: c, presentCount, cells, paymentStatus }) => {
       const cellsHtml = cells
         .map((cell, idx) => {
-          if (cell.type === 'noclass') return '<td class="att-noclass"></td>';
-          if (cell.type === 'empty') return '<td class="att-empty">-</td>';
+          const holidayClass = cell.isHoliday ? ' holiday-col' : '';
+          if (cell.type === 'noclass') return `<td class="att-noclass${holidayClass}"></td>`;
+          if (cell.type === 'empty') return `<td class="att-empty${holidayClass}" title="${cell.isHoliday ? '공휴일' : ''}">${cell.isHoliday ? '휴일' : '-'}</td>`;
           const makeupMark = cell.isMakeup ? '<br><span class="att-makeup-mark">(보강)</span>' : '';
           if (cell.type === 'present') {
             const countMark = cell.count !== 1 ? `<br><span class="att-count-mark">${cell.count}회</span>` : '';
-            return `<td class="att-present">출석${countMark}${makeupMark}</td>`;
+            return `<td class="att-present${holidayClass}">출석${countMark}${makeupMark}</td>`;
           }
           // 인쇄할 때 이름 밑에 사유가 길게 붙어 칸이 이상해지는 문제가 있어, 화면에는 사유를 바로 표시하지
           // 않고 클릭하면 그 날의 결석 사유를 볼 수 있게 한다 (인쇄물에는 "결석"만 나감).
           const hasReason = !!cell.reason;
-          return `<td class="att-absent${hasReason ? ' has-reason' : ''}" data-child="${c.id}" data-day="${dateList[idx]}" title="${hasReason ? '클릭하면 결석 사유를 볼 수 있어요' : ''}">결석${makeupMark}</td>`;
+          return `<td class="att-absent${hasReason ? ' has-reason' : ''}${holidayClass}" data-child="${c.id}" data-day="${dateList[idx]}" title="${hasReason ? '클릭하면 결석 사유를 볼 수 있어요' : ''}">결석${makeupMark}</td>`;
         })
         .join('');
       const badge = paymentStatus === 'unpaid'
