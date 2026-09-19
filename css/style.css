@@ -1280,11 +1280,12 @@ fieldset {
     display: table-row;
   }
 
-  .print-only-row th {
+  .schedule-table thead .print-only-row th {
     padding: .3rem 0 .6rem;
-    font-size: 13pt;
-    font-weight: 700;
-    text-align: center;
+    font-size: 16pt;
+    font-weight: 800;
+    text-align: left;
     background: #fff;
+    color: #000;
   }
 }
