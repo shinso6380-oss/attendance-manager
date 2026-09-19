@@ -705,24 +705,30 @@ body {
   overflow-y: auto;
 }
 
-.monthly-attendance-table thead tr:first-child th {
+.monthly-attendance-table thead .att-header-row-1 th {
   position: sticky;
   top: 0;
   z-index: 3;
   background: var(--bg);
 }
 
-.monthly-attendance-table thead tr:last-child th {
+.monthly-attendance-table thead .att-header-row-2 th {
   position: sticky;
   top: var(--att-header-row1-height, 32px);
   z-index: 3;
   background: var(--bg);
 }
 
-.monthly-attendance-table thead tr:first-child th:first-child,
-.monthly-attendance-table thead tr:last-child th:first-child {
+.monthly-attendance-table thead .att-header-row-1 th:first-child,
+.monthly-attendance-table thead .att-header-row-2 th:first-child {
   left: 0;
   z-index: 4;
+}
+
+/* 인쇄 전용 머리말 줄: 평소엔 안 보이다가 인쇄할 때만 표 헤더(thead)의 일부로 나타나서
+   표가 여러 페이지로 나뉘어도 모든 페이지 맨 위에 자동으로 반복된다 (브라우저의 표준 표 헤더 반복 동작). */
+.print-only-row {
+  display: none;
 }
 
 
@@ -1267,5 +1273,18 @@ fieldset {
 
   .monthly-attendance-table .att-name {
     position: static;
+  }
+
+  /* 표가 여러 페이지로 나뉠 때 각 페이지 맨 위에 반복되는 머리말 줄 */
+  .print-only-row {
+    display: table-row;
+  }
+
+  .print-only-row th {
+    padding: .3rem 0 .6rem;
+    font-size: 13pt;
+    font-weight: 700;
+    text-align: center;
+    background: #fff;
   }
 }
