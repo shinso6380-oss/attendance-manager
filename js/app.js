@@ -833,7 +833,6 @@ function bindEvents() {
   });
 
   document.getElementById('btnPrintAttendance').addEventListener('click', () => {
-    document.getElementById('attPrintTitle').textContent = getAttendanceReportTitle();
     setPrintPageSize('landscape');
     window.print();
   });
@@ -1112,8 +1111,7 @@ body { display: flex; align-items: center; justify-content: center; }
 }
 
 function getAttendanceReportTitle() {
-  const mm = String(attViewMonth).padStart(2, '0');
-  return `${attViewYear}년 ${mm}월 출석부-${currentUser?.name || ''}`;
+  return `${attViewYear}년 ${attViewMonth}월 ${currentUser?.name || ''} 출석부`;
 }
 
 function exportMonthlyAttendanceExcel() {
@@ -2878,18 +2876,22 @@ function renderMonthlyAttendance() {
 
   const totalRow = `<tr class="att-total-row"><th class="att-name">합계<span class="att-count">(${grandTotal}회)</span></th>${dateList.map(() => '<td></td>').join('')}</tr>`;
 
+  const totalCols = dateList.length + 1;
+  const printTitle = getAttendanceReportTitle();
+
   wrap.innerHTML = `
     <div class="payment-table-wrap monthly-attendance-scroll">
       <table class="schedule-table monthly-attendance-table">
         <thead>
-          <tr><th>이름</th>${headerDates}</tr>
-          <tr><th></th>${headerDays}</tr>
+          <tr class="print-only-row"><th colspan="${totalCols}">${esc(printTitle)}</th></tr>
+          <tr class="att-header-row-1"><th>이름</th>${headerDates}</tr>
+          <tr class="att-header-row-2"><th></th>${headerDays}</tr>
         </thead>
         <tbody>${bodyRows}${totalRow}</tbody>
       </table>
     </div>`;
 
-  const firstHeaderRow = wrap.querySelector('.monthly-attendance-table thead tr:first-child');
+  const firstHeaderRow = wrap.querySelector('.monthly-attendance-table .att-header-row-1');
   if (firstHeaderRow) {
     document.documentElement.style.setProperty('--att-header-row1-height', `${firstHeaderRow.offsetHeight}px`);
   }
