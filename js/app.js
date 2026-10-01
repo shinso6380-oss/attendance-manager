@@ -888,6 +888,8 @@ function closeChildHistoryModal() {
   historyChildId = null;
 }
 
+// 개별 납부 내역(연말정산용)에는 아직 "납부확인" 체크가 안 된 달의 계산 예정 금액이 섞여 들어가면 안 되므로,
+// 실제로 납부확인(additionalPaid/copayPaid)된 금액만 더한다. 확인 전이면 0원으로 취급한다.
 function getMonthlyFeeAmounts(childId, year, month) {
   const child = data.children.find((c) => c.id === childId);
   if (!child) return { additional: 0, copay: 0 };
@@ -895,8 +897,8 @@ function getMonthlyFeeAmounts(childId, year, month) {
   const rec = data.monthlyFees[mk]?.[childId];
   const sessionCount = rec?.sessionCount ?? countSessionsInMonth(year, month, child.days);
   const fee = calculateMonthlyFee(child, sessionCount);
-  const additional = rec?.additionalAmount ?? getNetAdditionalPayment(fee, rec, child);
-  const copay = rec?.copayAmount ?? fee.copay;
+  const additional = rec?.additionalPaid ? (rec.additionalAmount ?? getNetAdditionalPayment(fee, rec, child)) : 0;
+  const copay = rec?.copayPaid ? (rec.copayAmount ?? fee.copay) : 0;
   return { additional, copay };
 }
 
