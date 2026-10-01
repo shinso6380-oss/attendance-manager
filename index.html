@@ -264,6 +264,14 @@
           <legend>수업 요일 및 시간 * (요일별로 다르게 설정 가능)</legend>
           <div class="day-time-rows" id="dayTimeRows"></div>
         </fieldset>
+        <label class="field field-full">
+          <span>종결 처리일 (선택 시 그 날부터 시간표에 표시되지 않습니다)</span>
+          <input type="date" name="terminatedAt">
+        </label>
+        <label class="field field-full">
+          <span>종결 사유</span>
+          <textarea name="terminatedReason" rows="2" placeholder="예: 이사, 치료 종료, 타 기관 이동 등"></textarea>
+        </label>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn" id="cancelModal">취소</button>

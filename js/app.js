@@ -107,6 +107,9 @@ const EDU_VOUCHER_AMOUNTS = {
 
 const SPORTS_VOUCHER_AMOUNT = 110000;
 
+// 교육청 움터는 월 고정액이 아니라 출석 회차마다 지원받는 금액(1회당 45,000원)이다.
+const EDU_UMTER_PER_SESSION = 45000;
+
 const PAYMENT_ACCOUNTS = {
   copayDevelopmental: '경남은행 207-0064-8191-02 신승오(울산언어심리운동센터)',
   copayInfant: '경남은행 207-0077-8558-02 신승오(울산언어심리운동센터)',
@@ -373,6 +376,12 @@ function calculateMonthlyFee(child, sessionCount) {
     otherDeduction += SPORTS_VOUCHER_AMOUNT;
     breakdown.push(`스포츠바우처 차감: -${formatCurrency(SPORTS_VOUCHER_AMOUNT)}`);
   }
+  let umterDeduction = 0;
+  if (types.includes('edu-umter')) {
+    umterDeduction = sessionCount * EDU_UMTER_PER_SESSION;
+    otherDeduction += umterDeduction;
+    breakdown.push(`교육청 움터 차감: ${sessionCount}회 × ${formatCurrency(EDU_UMTER_PER_SESSION)} = -${formatCurrency(umterDeduction)}`);
+  }
 
   const extraAmount = extra6Amount + extra7Amount;
   const voucherDeduction = developmentalDeduction + otherDeduction;
@@ -397,6 +406,10 @@ function calculateMonthlyFee(child, sessionCount) {
   if (types.includes('sports')) {
     voucherDeductionLabels.push('스포츠');
     voucherDeductionItems.push({ label: '스포츠', amount: SPORTS_VOUCHER_AMOUNT });
+  }
+  if (types.includes('edu-umter')) {
+    voucherDeductionLabels.push('움터');
+    voucherDeductionItems.push({ label: '움터', amount: umterDeduction });
   }
 
   if (copay > 0) {
@@ -485,6 +498,8 @@ function rowToChild(row) {
     dayTimes,
     depositorNames: row.depositor_names || [],
     createdAt: row.created_at || null,
+    terminatedAt: row.terminated_at || '',
+    terminatedReason: row.terminated_reason || '',
   };
 }
 
@@ -502,7 +517,15 @@ function childToRow(child) {
     day_times: child.dayTimes || {},
     class_time: days.length ? child.dayTimes[days[0]] : null,
     depositor_names: child.depositorNames || [],
+    terminated_at: child.terminatedAt || null,
+    terminated_reason: child.terminatedReason || null,
   };
+}
+
+// 종결 처리일이 지정되지 않았거나 아직 그 날이 되지 않았으면 오늘 기준 활성 상태로 본다.
+// 종결 처리일 당일부터는 비활성(시간표 미노출) 처리한다.
+function isChildActiveToday(child) {
+  return !child.terminatedAt || dateKey() < child.terminatedAt;
 }
 
 let data = defaultData();
@@ -1311,6 +1334,8 @@ function openChildModal(child = null) {
     childForm.querySelector('[name="name"]').value = child.name;
     childForm.querySelector('[name="birthDate"]').value = child.birthDate || '';
     childForm.querySelector('[name="depositorNames"]').value = (child.depositorNames || []).join(', ');
+    childForm.querySelector('[name="terminatedAt"]').value = child.terminatedAt || '';
+    childForm.querySelector('[name="terminatedReason"]').value = child.terminatedReason || '';
     teacherSel.value = child.teacher;
     populateSubjectSelect(child.teacher);
     childForm.querySelector('[name="subject"]').value = child.subject;
@@ -1395,6 +1420,8 @@ async function handleChildSubmit(e) {
     dayTimes,
     days: Object.keys(dayTimes).map(Number),
     depositorNames,
+    terminatedAt: fd.get('terminatedAt') || '',
+    terminatedReason: String(fd.get('terminatedReason') || '').trim(),
   };
 
   const submitBtn = childForm.querySelector('.modal-footer .btn-primary');
@@ -1481,11 +1508,18 @@ function renderChildCard(c) {
     subLabels.push(INFANT_SUBTYPES[c.infantSub]?.label);
   }
   const voucherLabel = subLabels.length ? ` · ${subLabels.join(', ')}` : '';
+  let terminationBadge = '';
+  if (c.terminatedAt) {
+    const reasonAttr = c.terminatedReason ? ` title="사유: ${esc(c.terminatedReason)}"` : '';
+    terminationBadge = isChildActiveToday(c)
+      ? ` <span class="badge badge-unmatched"${reasonAttr}>종결 예정 (${esc(c.terminatedAt)}~)</span>`
+      : ` <span class="badge badge-absent"${reasonAttr}>종결됨 (${esc(c.terminatedAt)}~)</span>`;
+  }
   return `
   <div class="card">
     <div class="card-header">
       <div>
-        <div class="child-name child-name-link" data-history="${c.id}">${esc(c.name)}</div>
+        <div class="child-name child-name-link" data-history="${c.id}">${esc(c.name)}${terminationBadge}</div>
         <div class="child-meta">
           ${c.birthDate ? `${esc(c.birthDate)} (${getAgeString(c.birthDate)}) · ` : ''}
           ${getDayTimeLabel(c)} ·
@@ -2597,7 +2631,7 @@ function renderFees() {
 function renderSchedule() {
   document.getElementById('scheduleTitle').textContent = `${currentUser?.name || ''} 시간표 (월~토)`;
   const wrap = document.getElementById('scheduleTableWrap');
-  const children = getOwnChildren().filter((c) => c.dayTimes && Object.keys(c.dayTimes).length);
+  const children = getOwnChildren().filter((c) => c.dayTimes && Object.keys(c.dayTimes).length && isChildActiveToday(c));
   const scheduleDays = DAYS.slice(1); // 월~토 (일요일 제외)
 
   if (!children.length) {
@@ -2656,7 +2690,7 @@ const SCHEDULE_VOUCHER_FILL_COLORS = {
 };
 
 function exportScheduleExcel() {
-  const children = getOwnChildren().filter((c) => c.dayTimes && Object.keys(c.dayTimes).length);
+  const children = getOwnChildren().filter((c) => c.dayTimes && Object.keys(c.dayTimes).length && isChildActiveToday(c));
   const scheduleDays = DAYS.slice(1); // 월~토
   if (!children.length) {
     alert('등록된 수업 시간이 없습니다.');

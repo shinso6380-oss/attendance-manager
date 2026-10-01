@@ -1044,11 +1044,12 @@ body {
 .field-full { grid-column: 1 / -1; }
 .field span, .field legend { font-size: .85rem; font-weight: 600; }
 
-.field input, .field select {
+.field input, .field select, .field textarea {
   padding: .5rem .65rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   font-size: .875rem;
+  font-family: inherit;
 }
 
 fieldset {
