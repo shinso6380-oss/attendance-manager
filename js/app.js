@@ -2947,6 +2947,9 @@ function renderMonthlyAttendance() {
       const cid = th.dataset.child;
       // 이전에 클릭했던 다른 아이들은 안 보이게, 지금 클릭한 아이만 보이게 한다.
       feesIncludedIds = new Set([cid]);
+      // 지금 보고 있는 월 출석부와 같은 달의 수업료 산정 화면으로 이동한다 (다른 달이 열려 있으면 혼동되므로).
+      feeViewYear = attViewYear;
+      feeViewMonth = attViewMonth;
       switchTab('fees');
       document.querySelector(`.fee-card[data-fee-child="${cid}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
