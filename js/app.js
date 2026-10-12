@@ -295,13 +295,15 @@ function isKoreanHoliday(date) {
   return KR_HOLIDAYS.has(dateKey(date));
 }
 
-function countSessionsInMonth(year, month, days) {
+// terminatedAt(종결 처리일)이 있으면 그 날부터는 수업일로 세지 않는다.
+function countSessionsInMonth(year, month, days, terminatedAt = '') {
   if (!days?.length) return 0;
   const daySet = new Set(days);
   const lastDay = new Date(year, month, 0).getDate();
   let count = 0;
   for (let d = 1; d <= lastDay; d++) {
     const date = new Date(year, month - 1, d);
+    if (terminatedAt && dateKey(date) >= terminatedAt) break;
     if (daySet.has(date.getDay()) && !isKoreanHoliday(date)) count++;
   }
   return count;
@@ -526,6 +528,15 @@ function childToRow(child) {
 // 종결 처리일 당일부터는 비활성(시간표 미노출) 처리한다.
 function isChildActiveToday(child) {
   return !child.terminatedAt || dateKey() < child.terminatedAt;
+}
+
+function isChildActiveOn(child, date) {
+  return !child.terminatedAt || dateKey(date) < child.terminatedAt;
+}
+
+// 그 달 1일에 이미 종결된 상태면 그 달 화면(수업료 산정/월 출석부)에서 제외한다. 종결 당월은 종결 전까지의 내용이 남아야 하므로 계속 보여준다.
+function isChildActiveInMonth(child, year, month) {
+  return isChildActiveOn(child, new Date(year, month - 1, 1));
 }
 
 let data = defaultData();
@@ -895,7 +906,7 @@ function getMonthlyFeeAmounts(childId, year, month) {
   if (!child) return { additional: 0, copay: 0 };
   const mk = monthKey(year, month);
   const rec = data.monthlyFees[mk]?.[childId];
-  const sessionCount = rec?.sessionCount ?? countSessionsInMonth(year, month, child.days);
+  const sessionCount = rec?.sessionCount ?? countSessionsInMonth(year, month, child.days, child.terminatedAt);
   const fee = calculateMonthlyFee(child, sessionCount);
   const additional = rec?.additionalPaid ? (rec.additionalAmount ?? getNetAdditionalPayment(fee, rec, child)) : 0;
   const copay = rec?.copayPaid ? (rec.copayAmount ?? fee.copay) : 0;
@@ -1600,7 +1611,7 @@ function renderAttendance() {
   // 오늘 출석은 관리자여도 본인 담당 대상자만 보이게 한다 (다른 화면의 "관리자는 전체 보기"와는 별개).
   const visible = getOwnChildren();
   const scheduled = visible
-    .filter((c) => c.days.includes(todayDow))
+    .filter((c) => c.days.includes(todayDow) && isChildActiveOn(c, viewDate))
     .sort((a, b) => (a.dayTimes?.[todayDow] || '').localeCompare(b.dayTimes?.[todayDow] || ''));
   const scheduledIds = new Set(scheduled.map((c) => c.id));
 
@@ -1620,7 +1631,7 @@ function renderAttendance() {
 
   const todayIds = new Set(todayChildren.map((c) => c.id));
   const makeupOptions = visible
-    .filter((c) => !todayIds.has(c.id))
+    .filter((c) => !todayIds.has(c.id) && isChildActiveOn(c, viewDate))
     .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
   makeupSelect.innerHTML =
     '<option value="">+ 보강 인원 추가</option>' +
@@ -1828,7 +1839,7 @@ function getOrCreateFeeRecordForMonth(childId, year, month) {
   if (!data.monthlyFees[mk]) data.monthlyFees[mk] = {};
   if (!data.monthlyFees[mk][childId]) {
     const child = data.children.find((c) => c.id === childId);
-    const auto = child ? countSessionsInMonth(year, month, child.days) : 0;
+    const auto = child ? countSessionsInMonth(year, month, child.days, child.terminatedAt) : 0;
     data.monthlyFees[mk][childId] = {
       sessionCount: auto,
       additionalDepositDate: '',
@@ -2370,7 +2381,7 @@ function renderFees() {
   document.getElementById('feeMonthLabel').textContent = `${feeViewYear}년 ${feeViewMonth}월`;
   const list = document.getElementById('feesList');
   const checkboxWrap = document.getElementById('feesChildCheckboxes');
-  const allChildren = getOwnChildren();
+  const allChildren = getOwnChildren().filter((c) => isChildActiveInMonth(c, feeViewYear, feeViewMonth));
 
   if (!allChildren.length) {
     checkboxWrap.innerHTML = '';
@@ -2406,7 +2417,7 @@ function renderFees() {
 
   list.innerHTML = children
     .map((c) => {
-      const autoCount = countSessionsInMonth(feeViewYear, feeViewMonth, c.days);
+      const autoCount = countSessionsInMonth(feeViewYear, feeViewMonth, c.days, c.terminatedAt);
       const feeRec = getFeeRecord(c.id);
       const sessionCount = feeRec.sessionCount ?? autoCount;
       const fee = calculateMonthlyFee(c, sessionCount);
@@ -2777,7 +2788,7 @@ function exportScheduleExcel() {
 function getPaymentStatus(child, year, month) {
   const mk = monthKey(year, month);
   const feeRec = data.monthlyFees[mk]?.[child.id];
-  const sessionCount = feeRec?.sessionCount ?? countSessionsInMonth(year, month, child.days);
+  const sessionCount = feeRec?.sessionCount ?? countSessionsInMonth(year, month, child.days, child.terminatedAt);
   const fee = calculateMonthlyFee(child, sessionCount);
 
   const netAdditional = getNetAdditionalPayment(fee, feeRec, child);
@@ -2810,7 +2821,7 @@ function sortChildrenByAttendanceDay(children) {
 }
 
 function computeMonthlyAttendanceData(year, month) {
-  const children = sortChildrenByAttendanceDay(getOwnChildren());
+  const children = sortChildrenByAttendanceDay(getOwnChildren().filter((c) => isChildActiveInMonth(c, year, month)));
   const lastDay = new Date(year, month, 0).getDate();
   const dateList = Array.from({ length: lastDay }, (_, i) => i + 1);
 
@@ -2820,7 +2831,7 @@ function computeMonthlyAttendanceData(year, month) {
     const cells = dateList.map((d) => {
       const date = new Date(year, month - 1, d);
       const dow = date.getDay();
-      const isScheduled = c.days.includes(dow);
+      const isScheduled = c.days.includes(dow) && isChildActiveOn(c, date);
       const key = dateKey(date);
       const record = data.attendance[key]?.[c.id];
       const isHoliday = isKoreanHoliday(date);
