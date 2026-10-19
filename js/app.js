@@ -595,11 +595,26 @@ async function init() {
   }
 }
 
+// Supabase는 한 번에 최대 1000행까지만 돌려주므로, 1000행씩 나눠서 전부 가져온다.
+async function fetchAllRows(table, orderColumns) {
+  const PAGE = 1000;
+  let all = [];
+  for (let from = 0; ; from += PAGE) {
+    let q = supabaseClient.from(table).select('*');
+    orderColumns.forEach((c) => { q = q.order(c, { ascending: true }); });
+    const { data: rows, error } = await q.range(from, from + PAGE - 1);
+    if (error) return { data: null, error };
+    all = all.concat(rows || []);
+    if (!rows || rows.length < PAGE) break;
+  }
+  return { data: all, error: null };
+}
+
 async function loadAllData() {
   const [childrenRes, attendanceRes, feesRes, pwRes] = await Promise.all([
-    supabaseClient.from('children').select('*'),
-    supabaseClient.from('attendance').select('*'),
-    supabaseClient.from('monthly_fees').select('*'),
+    fetchAllRows('children', ['id']),
+    fetchAllRows('attendance', ['date', 'child_id']),
+    fetchAllRows('monthly_fees', ['month_key', 'child_id']),
     supabaseClient.from('teacher_passwords').select('*'),
   ]);
 
