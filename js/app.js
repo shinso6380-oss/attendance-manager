@@ -628,11 +628,26 @@ async function init() {
   }
 }
 
+// Supabase는 한 번에 최대 1000행까지만 돌려주므로, 그보다 많아질 수 있는 테이블은 페이지를 넘겨가며 전부 읽어온다.
+// (안 그러면 오래 쌓인 기록이 많아졌을 때 나머지 행이 화면에서 사라진 것처럼 보인다.)
+async function fetchAllRows(buildQuery) {
+  const PAGE = 1000;
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: chunk, error } = await buildQuery().range(from, from + PAGE - 1);
+    if (error) return { data: null, error };
+    if (!chunk?.length) break;
+    rows.push(...chunk);
+    if (rows.length > 200000) break;
+  }
+  return { data: rows, error: null };
+}
+
 async function loadAllData() {
   const [childrenRes, attendanceRes, feesRes, pwRes] = await Promise.all([
-    supabaseClient.from('children').select('*'),
-    supabaseClient.from('attendance').select('*'),
-    supabaseClient.from('monthly_fees').select('*'),
+    fetchAllRows(() => supabaseClient.from('children').select('*').order('id')),
+    fetchAllRows(() => supabaseClient.from('attendance').select('*').order('date').order('child_id')),
+    fetchAllRows(() => supabaseClient.from('monthly_fees').select('*').order('month_key').order('child_id')),
     supabaseClient.from('teacher_passwords').select('*'),
   ]);
 
@@ -1985,7 +2000,9 @@ function findUniqueMatchingChild(cleanName) {
 }
 
 async function loadDeposits() {
-  const { data: rows, error } = await supabaseClient.from('deposits').select('*').order('txn_datetime', { ascending: false });
+  const { data: rows, error } = await fetchAllRows(() =>
+    supabaseClient.from('deposits').select('*').order('txn_datetime', { ascending: false }).order('id')
+  );
   if (error) {
     console.error(error);
     depositRows = [];
