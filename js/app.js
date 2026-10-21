@@ -72,13 +72,14 @@ function getDevelopmentalCopay(subject, sub, sessionCount) {
 }
 
 // 1~5회차: 회당 정부지원금(바우처 차감) / 6회차: 6회차 1회분 정부지원금 (출처: 바우처 계산.xlsx)
+// 다형은 본인부담금이 0원이라 회당 금액 전부를 정부지원금으로 차감한다 (총 지원금 26만원).
 const DEVELOPMENTAL_PER_SESSION_VOUCHER = {
-  psychomotor: { ga: 46000, na: 42500, ra: 38500, ma: 34500, da: 0 },
-  language: { ga: 44160, na: 40800, ra: 36960, ma: 33120, da: 0 },
+  psychomotor: { ga: 46000, na: 42500, ra: 38500, ma: 34500, da: 50000 },
+  language: { ga: 44160, na: 40800, ra: 36960, ma: 33120, da: 48000 },
 };
 const DEVELOPMENTAL_SIXTH_SESSION_VOUCHER = {
-  psychomotor: { ga: 10000, na: 7500, ra: 7500, ma: 7500, da: 0 },
-  language: { ga: 19200, na: 16000, ra: 15200, ma: 14400, da: 0 },
+  psychomotor: { ga: 10000, na: 7500, ra: 7500, ma: 7500, da: 10000 },
+  language: { ga: 19200, na: 16000, ra: 15200, ma: 14400, da: 20000 },
 };
 
 function getDevelopmentalVoucherDeduction(subject, sub, sessionCount) {
