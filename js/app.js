@@ -559,6 +559,7 @@ let depositViewYear = new Date().getFullYear();
 let depositViewMonth = new Date().getMonth() + 1;
 let depositRows = [];
 let depositsLoaded = false;
+let depositListMode = 'unpaid'; // 'unpaid' | 'paid'
 
 const loadingScreen = document.getElementById('loadingScreen');
 const loginScreen = document.getElementById('loginScreen');
@@ -595,26 +596,11 @@ async function init() {
   }
 }
 
-// Supabase는 한 번에 최대 1000행까지만 돌려주므로, 1000행씩 나눠서 전부 가져온다.
-async function fetchAllRows(table, orderColumns) {
-  const PAGE = 1000;
-  let all = [];
-  for (let from = 0; ; from += PAGE) {
-    let q = supabaseClient.from(table).select('*');
-    orderColumns.forEach((c) => { q = q.order(c, { ascending: true }); });
-    const { data: rows, error } = await q.range(from, from + PAGE - 1);
-    if (error) return { data: null, error };
-    all = all.concat(rows || []);
-    if (!rows || rows.length < PAGE) break;
-  }
-  return { data: all, error: null };
-}
-
 async function loadAllData() {
   const [childrenRes, attendanceRes, feesRes, pwRes] = await Promise.all([
-    fetchAllRows('children', ['id']),
-    fetchAllRows('attendance', ['date', 'child_id']),
-    fetchAllRows('monthly_fees', ['month_key', 'child_id']),
+    supabaseClient.from('children').select('*'),
+    supabaseClient.from('attendance').select('*'),
+    supabaseClient.from('monthly_fees').select('*'),
     supabaseClient.from('teacher_passwords').select('*'),
   ]);
 
@@ -865,6 +851,14 @@ function bindEvents() {
     handleDepositFileUpload(fileInput.files[0]);
   });
   document.getElementById('btnExportUnpaidExcel').addEventListener('click', exportUnpaidCopayExcel);
+  document.getElementById('btnDepositModeUnpaid').addEventListener('click', () => {
+    depositListMode = 'unpaid';
+    renderDeposits();
+  });
+  document.getElementById('btnDepositModePaid').addEventListener('click', () => {
+    depositListMode = 'paid';
+    renderDeposits();
+  });
 
   document.getElementById('attPrevMonth').addEventListener('click', () => {
     attViewMonth--;
@@ -2128,7 +2122,7 @@ function renderDeposits() {
     document.getElementById('depositUnmatchedList').innerHTML =
       '<p class="empty-msg">deposits 테이블이 없습니다. sql/2026-09-18-deposit-matching.sql을 Supabase SQL Editor에서 먼저 실행해 주세요.</p>';
     document.getElementById('depositUnmatchedCount').textContent = '';
-    renderUnpaidCopayList(copayChildren);
+    renderCopayStatusList(copayChildren);
     return;
   }
 
@@ -2188,39 +2182,93 @@ function renderDeposits() {
     });
   }
 
-  renderUnpaidCopayList(copayChildren);
+  renderCopayStatusList(copayChildren);
 }
 
-function getUnpaidCopayRows(copayChildren) {
-  return copayChildren
-    .map((c) => {
-      const feeRec = getOrCreateFeeRecordForMonth(c.id, depositViewYear, depositViewMonth);
-      const fee = calculateMonthlyFee(c, feeRec.sessionCount);
-      return { child: c, feeRec, fee };
-    })
-    .filter(({ fee, feeRec }) => fee.copay > 0 && !feeRec.copayPaid);
+// DB의 timestamptz는 은행 거래시각을 그대로 저장한 값이라, 시간대 변환 없이 문자열만 잘라서 보여준다.
+function formatDepositDateTime(iso) {
+  return String(iso || '').replace('T', ' ').slice(0, 16);
 }
 
-function renderUnpaidCopayList(copayChildren) {
-  const rows = getUnpaidCopayRows(copayChildren);
+// 선택한 달의 본인부담금 대상자를 미납/납부로 나눈다. 납부자는 매칭된 입금 거래(없으면 직접 입력한 입금일)를 납부일시로 붙인다.
+function getCopayStatusRows(copayChildren) {
+  const mk = monthKey(depositViewYear, depositViewMonth);
+  const unpaid = [];
+  const paid = [];
+  copayChildren.forEach((child) => {
+    const feeRec = getOrCreateFeeRecordForMonth(child.id, depositViewYear, depositViewMonth);
+    const fee = calculateMonthlyFee(child, feeRec.sessionCount);
+    if (fee.copay <= 0) return;
+    if (!feeRec.copayPaid) {
+      unpaid.push({ child, feeRec, fee });
+      return;
+    }
+    const matched = depositRows
+      .filter((d) => d.status === 'matched' && String(d.matched_child_id) === String(child.id) && d.matched_month_key === mk)
+      .sort((a, b) => (a.txn_datetime > b.txn_datetime ? 1 : -1));
+    const paidAtList = matched.length
+      ? matched.map((d) => formatDepositDateTime(d.txn_datetime))
+      : feeRec.copayDepositDate
+        ? [`${feeRec.copayDepositDate} (직접 입력)`]
+        : [];
+    paid.push({ child, feeRec, fee, paidAtList });
+  });
+  return { unpaid, paid };
+}
+
+function renderCopayStatusList(copayChildren) {
+  const { unpaid, paid } = getCopayStatusRows(copayChildren);
+  document.getElementById('depositUnpaidCount').textContent = `(${unpaid.length})`;
+  document.getElementById('depositPaidCount').textContent = `(${paid.length})`;
+  document.getElementById('btnDepositModeUnpaid').classList.toggle('btn-primary', depositListMode === 'unpaid');
+  document.getElementById('btnDepositModePaid').classList.toggle('btn-primary', depositListMode === 'paid');
+
   const listEl = document.getElementById('depositUnpaidList');
-  if (!rows.length) {
-    listEl.innerHTML = '<p class="empty-msg">미납자가 없습니다.</p>';
+  if (depositListMode === 'unpaid') {
+    if (!unpaid.length) {
+      listEl.innerHTML = '<p class="empty-msg">미납자가 없습니다.</p>';
+      return;
+    }
+    listEl.innerHTML = `
+      <div class="payment-table-wrap">
+        <table class="payment-table">
+          <thead><tr><th>이름</th><th>담당 선생님</th><th>본인부담금</th><th>입금액(일부)</th></tr></thead>
+          <tbody>
+            ${unpaid
+              .map(
+                ({ child, feeRec, fee }) => `
+              <tr>
+                <td>${esc(child.name)}</td>
+                <td>${esc(child.teacher)}</td>
+                <td class="amount">${formatCurrency(fee.copay)}</td>
+                <td class="amount">${formatCurrency(feeRec.copayAmount || 0)}</td>
+              </tr>`
+              )
+              .join('')}
+          </tbody>
+        </table>
+      </div>`;
+    return;
+  }
+
+  if (!paid.length) {
+    listEl.innerHTML = '<p class="empty-msg">납부자가 없습니다.</p>';
     return;
   }
   listEl.innerHTML = `
     <div class="payment-table-wrap">
       <table class="payment-table">
-        <thead><tr><th>이름</th><th>담당 선생님</th><th>예상 본인부담금</th><th>입금액</th></tr></thead>
+        <thead><tr><th>이름</th><th>담당 선생님</th><th>본인부담금</th><th>입금액</th><th>납부일시</th></tr></thead>
         <tbody>
-          ${rows
+          ${paid
             .map(
-              ({ child, feeRec, fee }) => `
+              ({ child, feeRec, fee, paidAtList }) => `
             <tr>
               <td>${esc(child.name)}</td>
               <td>${esc(child.teacher)}</td>
               <td class="amount">${formatCurrency(fee.copay)}</td>
-              <td class="amount">${formatCurrency(feeRec.copayAmount || 0)}</td>
+              <td class="amount">${formatCurrency(feeRec.copayAmount ?? fee.copay)}</td>
+              <td>${paidAtList.length ? paidAtList.map(esc).join('<br>') : '-'}</td>
             </tr>`
             )
             .join('')}
@@ -2231,20 +2279,29 @@ function renderUnpaidCopayList(copayChildren) {
 
 function exportUnpaidCopayExcel() {
   const copayChildren = data.children.filter(needsCopayField).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-  const rows = getUnpaidCopayRows(copayChildren);
-  if (!rows.length) {
-    alert('미납자가 없습니다.');
+  const { unpaid, paid } = getCopayStatusRows(copayChildren);
+  if (!unpaid.length && !paid.length) {
+    alert('이 달에 본인부담금 대상자가 없습니다.');
     return;
   }
-  const aoa = [['이름', '담당 선생님', '예상 본인부담금', '입금액']];
-  rows.forEach(({ child, feeRec, fee }) => {
-    aoa.push([child.name, child.teacher, fee.copay, feeRec.copayAmount || 0]);
+
+  const unpaidAoa = [['이름', '담당 선생님', '본인부담금', '입금액(일부)']];
+  unpaid.forEach(({ child, feeRec, fee }) => {
+    unpaidAoa.push([child.name, child.teacher, fee.copay, feeRec.copayAmount || 0]);
   });
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }];
+  const paidAoa = [['이름', '담당 선생님', '본인부담금', '입금액', '납부일시']];
+  paid.forEach(({ child, feeRec, fee, paidAtList }) => {
+    paidAoa.push([child.name, child.teacher, fee.copay, feeRec.copayAmount ?? fee.copay, paidAtList.join(', ')]);
+  });
+
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, '미납자명단');
-  XLSX.writeFile(wb, `${depositViewYear}년 ${depositViewMonth}월 본인부담금 미납자명단.xlsx`);
+  const unpaidWs = XLSX.utils.aoa_to_sheet(unpaidAoa);
+  unpaidWs['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }];
+  const paidWs = XLSX.utils.aoa_to_sheet(paidAoa);
+  paidWs['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 30 }];
+  XLSX.utils.book_append_sheet(wb, unpaidWs, '미납자');
+  XLSX.utils.book_append_sheet(wb, paidWs, '납부자');
+  XLSX.writeFile(wb, `${depositViewYear}년 ${depositViewMonth}월 본인부담금 납부현황.xlsx`);
 }
 
 // 학부모에게 카톡 등으로 보내기 좋게, 이용료 정산 내역만 깔끔하게 1:1 정사각형 이미지로 캡쳐한다.
