@@ -443,8 +443,32 @@ function getExtraSubjectFee(child, feeRec) {
 
 // 이월 금액 조정은 추가납부액에서만 반영하고 본인부담금(copay)에는 영향을 주지 않는다.
 // 양수 = 이번 달에 더 받아야 함(가산), 음수 = 이번 달에서 차감.
-function getNetAdditionalPayment(fee, feeRec, child) {
-  return fee.additionalPayment + (feeRec?.carryoverAmount || 0) + getExtraSubjectFee(child, feeRec);
+function getNetAdditionalPayment(fee, feeRec, child, year, month) {
+  return fee.additionalPayment + (feeRec?.carryoverAmount || 0) + getExtraSubjectFee(child, feeRec) + getAutoCarryover(child, year, month).amount;
+}
+
+// 지난달 추가납부액이 마이너스(바우처 차감이 총 금액보다 큼)였다면 그 금액이 이번 달로 자동 이월된다.
+// 지난달도 그 전달에서 이월받은 금액을 포함해 계산하므로 다 소진될 때까지 연쇄로 넘어간다.
+// 반환: { amount: 0 이하의 이월 금액(차감), fromMonth: 이월 출처 월 }
+function getAutoCarryover(child, year, month, depth = 0) {
+  const none = { amount: 0, fromMonth: null };
+  if (!child || !year || !month || depth > 24) return none;
+  const py = month === 1 ? year - 1 : year;
+  const pm = month === 1 ? 12 : month - 1;
+  // 대상자 등록 이전 달에서는 이월되지 않는다.
+  if (child.createdAt) {
+    const created = new Date(child.createdAt);
+    if (py * 12 + pm < created.getFullYear() * 12 + (created.getMonth() + 1)) return none;
+  }
+  const rec = data.monthlyFees[monthKey(py, pm)]?.[child.id];
+  const sessionCount = rec?.sessionCount ?? countSessionsInMonth(py, pm, child.days, child.terminatedAt);
+  const fee = calculateMonthlyFee(child, sessionCount);
+  const net =
+    fee.additionalPayment +
+    (rec?.carryoverAmount || 0) +
+    getExtraSubjectFee(child, rec) +
+    getAutoCarryover(child, py, pm, depth + 1).amount;
+  return net < 0 ? { amount: net, fromMonth: pm } : none;
 }
 
 function dateKey(date = new Date()) {
@@ -921,7 +945,7 @@ function getMonthlyFeeAmounts(childId, year, month) {
   const rec = data.monthlyFees[mk]?.[childId];
   const sessionCount = rec?.sessionCount ?? countSessionsInMonth(year, month, child.days, child.terminatedAt);
   const fee = calculateMonthlyFee(child, sessionCount);
-  const additional = rec?.additionalPaid ? (rec.additionalAmount ?? getNetAdditionalPayment(fee, rec, child)) : 0;
+  const additional = rec?.additionalPaid ? (rec.additionalAmount ?? getNetAdditionalPayment(fee, rec, child, year, month)) : 0;
   const copay = rec?.copayPaid ? (rec.copayAmount ?? fee.copay) : 0;
   return { additional, copay };
 }
@@ -2315,7 +2339,8 @@ async function captureFeeSummary(childId) {
 
   const feeRec = getFeeRecord(childId);
   const fee = calculateMonthlyFee(child, feeRec.sessionCount);
-  const netAdditional = getNetAdditionalPayment(fee, feeRec, child);
+  const netAdditional = getNetAdditionalPayment(fee, feeRec, child, feeViewYear, feeViewMonth);
+  const autoCarry = getAutoCarryover(child, feeViewYear, feeViewMonth);
   const showCopay = needsCopayField(child);
 
   const basisLabel = `${SUBJECTS[child.subject]?.label || ''} ${feeRec.sessionCount}회`;
@@ -2334,6 +2359,9 @@ async function captureFeeSummary(childId) {
       deduct: true,
     });
   });
+  if (autoCarry.amount < 0) {
+    infoRows.push({ label: `${autoCarry.fromMonth}월 이월금 차감`, value: `-${formatCurrency(-autoCarry.amount)}`, deduct: true });
+  }
   if ((feeRec.carryoverAmount || 0) > 0) {
     infoRows.push({ label: '이월 추가 징수', value: `+${formatCurrency(feeRec.carryoverAmount)}` });
   } else if ((feeRec.carryoverAmount || 0) < 0) {
@@ -2498,7 +2526,8 @@ function renderFees() {
       const sessionCount = feeRec.sessionCount ?? autoCount;
       const fee = calculateMonthlyFee(c, sessionCount);
       const showCopay = needsCopayField(c);
-      const netAdditional = getNetAdditionalPayment(fee, feeRec, c);
+      const netAdditional = getNetAdditionalPayment(fee, feeRec, c, feeViewYear, feeViewMonth);
+      const autoCarry = getAutoCarryover(c, feeViewYear, feeViewMonth);
 
       const paymentRows = [];
       if (netAdditional !== 0) {
@@ -2506,7 +2535,7 @@ function renderFees() {
         paymentRows.push(`
           <tr>
             <td>추가납부액</td>
-            <td class="amount amount-strong${isNegative ? ' amount-negative' : ''}">${formatCurrency(netAdditional)}</td>
+            <td class="amount amount-strong${isNegative ? ' amount-negative' : ''}">${formatCurrency(netAdditional)}${autoCarry.amount < 0 ? ` <span class="text-muted">(${autoCarry.fromMonth}월 이월금 포함)</span>` : ''}</td>
             <td>${esc(PAYMENT_ACCOUNTS.additional)}</td>
           </tr>`);
       }
@@ -2578,6 +2607,13 @@ function renderFees() {
             <div class="value">+${formatCurrency(fee.extra7Amount)}</div>
           </div>` : ''}
         </div>
+
+        ${autoCarry.amount < 0 ? `
+        <div class="fee-input-row">
+          <label>자동 이월금</label>
+          <strong class="fee-deduct">${formatSignedCurrency(autoCarry.amount)}</strong>
+          <span class="text-muted">(${autoCarry.fromMonth}월 이월금 · 지난달 추가납부액이 마이너스여서 자동 차감)</span>
+        </div>` : ''}
 
         <div class="fee-input-row">
           <label>이월 금액 조정</label>
@@ -2856,7 +2892,7 @@ function getPaymentStatus(child, year, month) {
   const sessionCount = feeRec?.sessionCount ?? countSessionsInMonth(year, month, child.days, child.terminatedAt);
   const fee = calculateMonthlyFee(child, sessionCount);
 
-  const netAdditional = getNetAdditionalPayment(fee, feeRec, child);
+  const netAdditional = getNetAdditionalPayment(fee, feeRec, child, year, month);
   const needsAdditional = netAdditional > 0;
   const needsCopay = needsCopayField(child) && fee.copay > 0;
   if (!needsAdditional && !needsCopay) {
