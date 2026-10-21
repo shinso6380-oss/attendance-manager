@@ -2577,9 +2577,8 @@ function renderFees() {
 
         <div class="fee-input-row">
           <label>이월 금액 조정</label>
-          <button type="button" class="btn btn-sm carryover-sign-toggle">±</button>
           <input type="text" inputmode="numeric" class="carryover-amount" value="${formatSignedMoneyInputValue(feeRec.carryoverAmount || 0)}" placeholder="0원">
-          <span class="text-muted">(양수 = 이번 달에 더 받아야 함, 음수 = 이번 달에서 차감 · 추가납부액에서만 반영, 본인부담금엔 영향 없음)</span>
+          <span class="text-muted">(입력한 금액은 항상 이번 달에서 차감(-)됩니다 · 추가납부액에서만 반영, 본인부담금엔 영향 없음)</span>
         </div>
 
         ${paymentTableHtml}
@@ -2661,19 +2660,9 @@ function renderFees() {
     attachSignedMoneyInputFormatting(carryoverInput);
     carryoverInput?.addEventListener('change', async (e) => {
       const rec = getFeeRecord(cid);
-      // 금액을 새로 입력할 땐 부호와 상관없이 절댓값만 받고, 이미 정해둔 부호(±로 바꾼 값)를 그대로
-      // 유지한다. 아직 부호를 정한 적 없으면(0에서 새로 입력) 기본값은 음수(차감)로 한다.
-      const magnitude = Math.abs(parseMoneyInputValue(e.target.value));
-      const sign = rec.carryoverAmount > 0 ? 1 : -1;
-      rec.carryoverAmount = magnitude * sign;
+      // 부호와 상관없이 입력한 금액은 항상 차감(음수)으로 저장한다.
+      rec.carryoverAmount = -Math.abs(parseMoneyInputValue(e.target.value));
       e.target.value = formatSignedMoneyInputValue(rec.carryoverAmount);
-      await persistFeeRecord(cid);
-      renderFees();
-    });
-
-    card.querySelector('.carryover-sign-toggle')?.addEventListener('click', async () => {
-      const rec = getFeeRecord(cid);
-      rec.carryoverAmount = -(rec.carryoverAmount || 0);
       await persistFeeRecord(cid);
       renderFees();
     });
