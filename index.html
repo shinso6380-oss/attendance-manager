@@ -186,7 +186,7 @@
 
         <div class="deposit-section-block">
           <div class="panel-header">
-            <h3>미납자 명단 (본인부담금)</h3>
+            <h3>월별 납부 현황 (본인부담금)</h3>
             <div class="month-picker">
               <button class="btn btn-icon" id="depositPrevMonth">◀</button>
               <span id="depositMonthLabel"></span>
@@ -194,7 +194,9 @@
             </div>
           </div>
           <div class="att-actions no-print">
-            <button class="btn btn-sm" id="btnExportUnpaidExcel">엑셀 다운로드</button>
+            <button type="button" class="btn btn-sm btn-primary" id="btnDepositModeUnpaid">미납자 <span id="depositUnpaidCount"></span></button>
+            <button type="button" class="btn btn-sm" id="btnDepositModePaid">납부자 <span id="depositPaidCount"></span></button>
+            <button class="btn btn-sm" id="btnExportUnpaidExcel">엑셀 다운로드 (미납·납부 2시트)</button>
           </div>
           <div id="depositUnpaidList" class="deposit-list"></div>
         </div>
