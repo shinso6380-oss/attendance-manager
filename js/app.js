@@ -884,6 +884,7 @@ function bindEvents() {
     handleDepositFileUpload(fileInput.files[0]);
   });
   document.getElementById('btnExportUnpaidExcel').addEventListener('click', exportUnpaidCopayExcel);
+  document.getElementById('btnCopyUnpaidNames').addEventListener('click', copyUnpaidCopayNames);
   document.getElementById('btnDepositModeUnpaid').addEventListener('click', () => {
     depositListMode = 'unpaid';
     renderDeposits();
@@ -2225,6 +2226,29 @@ function formatDepositDateTime(iso) {
   return String(iso || '').replace('T', ' ').slice(0, 16);
 }
 
+// 카톡에 바로 붙여넣을 수 있게 "N월 발달재활 본인부담금 미납" 제목 아래 이름만 한 줄씩 복사한다. 전체 선생님 담당 아이가 대상이다.
+async function copyUnpaidCopayNames() {
+  const { unpaid } = getCopayStatusRows(data.children.filter(needsCopayField));
+  if (!unpaid.length) {
+    alert('미납자가 없습니다.');
+    return;
+  }
+  const names = unpaid.map(({ child }) => child.name).sort((a, b) => a.localeCompare(b, 'ko'));
+  const text = `${depositViewMonth}월 발달재활 본인부담금 미납\n${names.join('\n')}`;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (err) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed; left:-9999px;';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+  alert('복사되었습니다.');
+}
+
 // 선택한 달의 본인부담금 대상자를 미납/납부로 나눈다. 납부자는 매칭된 입금 거래(없으면 직접 입력한 입금일)를 납부일시로 붙인다.
 function getCopayStatusRows(copayChildren) {
   const mk = monthKey(depositViewYear, depositViewMonth);
@@ -2324,16 +2348,35 @@ function exportUnpaidCopayExcel() {
   unpaid.forEach(({ child, feeRec, fee }) => {
     unpaidAoa.push([child.name, child.teacher, fee.copay, feeRec.copayAmount || 0]);
   });
-  const paidAoa = [['이름', '담당 선생님', '본인부담금', '입금액', '납부일시']];
+  // 납부일시는 연도·시간 없이 "10월02일"처럼 월일만 보여준다 (분납이면 쉼표로 이어붙임).
+  const toMonthDay = (s) => {
+    const m = String(s).match(/\d{4}-(\d{2})-(\d{2})/);
+    return m ? `${m[1]}월${m[2]}일` : String(s);
+  };
+  const paidAoa = [['이름', '담당 선생님', '입금액', '납부일시']];
   paid.forEach(({ child, feeRec, fee, paidAtList }) => {
-    paidAoa.push([child.name, child.teacher, fee.copay, feeRec.copayAmount ?? fee.copay, paidAtList.join(', ')]);
+    paidAoa.push([child.name, child.teacher, feeRec.copayAmount ?? fee.copay, paidAtList.map(toMonthDay).join(', ')]);
   });
+
+  // 금액 칸은 숫자로 넣고 통화 서식(천 단위 쉼표 + 원)을 입힌다.
+  const CURRENCY_FMT = '#,##0"원"';
+  const applyCurrencyFormat = (ws, colIndexes) => {
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let r = range.s.r + 1; r <= range.e.r; r++) {
+      colIndexes.forEach((c) => {
+        const cell = ws[XLSX.utils.encode_cell({ r, c })];
+        if (cell && cell.t === 'n') cell.z = CURRENCY_FMT;
+      });
+    }
+  };
 
   const wb = XLSX.utils.book_new();
   const unpaidWs = XLSX.utils.aoa_to_sheet(unpaidAoa);
   unpaidWs['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }];
+  applyCurrencyFormat(unpaidWs, [2, 3]);
   const paidWs = XLSX.utils.aoa_to_sheet(paidAoa);
-  paidWs['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 30 }];
+  paidWs['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 20 }];
+  applyCurrencyFormat(paidWs, [2]);
   XLSX.utils.book_append_sheet(wb, unpaidWs, '미납자');
   XLSX.utils.book_append_sheet(wb, paidWs, '납부자');
   XLSX.writeFile(wb, `${depositViewYear}년 ${depositViewMonth}월 본인부담금 납부현황.xlsx`);
@@ -2678,7 +2721,14 @@ function renderFees() {
     card.querySelector('.capture-fee-btn')?.addEventListener('click', () => captureFeeSummary(cid));
 
     card.querySelector('.session-count')?.addEventListener('change', async (e) => {
-      getFeeRecord(cid).sessionCount = Math.max(0, Number(e.target.value) || 0);
+      const rec = getFeeRecord(cid);
+      rec.sessionCount = Math.max(0, Number(e.target.value) || 0);
+      // 입금은 이미 들어왔는데 수업 횟수가 달라 본인부담금이 안 맞아 체크가 안 된 경우, 횟수를 고치면 바로 납부확인 처리한다.
+      const child = data.children.find((c) => c.id === cid);
+      if (child && !rec.copayPaid && rec.copayDepositDate && (rec.copayAmount || 0) > 0) {
+        const copay = calculateMonthlyFee(child, rec.sessionCount).copay;
+        if (copay > 0 && rec.copayAmount >= copay) rec.copayPaid = true;
+      }
       await persistFeeRecord(cid);
       renderFees();
     });
