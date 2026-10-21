@@ -449,10 +449,12 @@ function getNetAdditionalPayment(fee, feeRec, child, year, month) {
 
 // 지난달 추가납부액이 마이너스(바우처 차감이 총 금액보다 큼)였다면 그 금액이 이번 달로 자동 이월된다.
 // 지난달도 그 전달에서 이월받은 금액을 포함해 계산하므로 다 소진될 때까지 연쇄로 넘어간다.
-// 반환: { amount: 0 이하의 이월 금액(차감), fromMonth: 이월 출처 월 }
+// 이월금을 현금으로 환급한 경우처럼 이번 달에 적용하지 않기로 한 달(autoCarryoverDisabled)은 차감하지 않는다.
+// 반환: { amount: 실제 적용되는 이월 금액(0 이하), available: 적용 여부와 무관하게 넘어온 금액, fromMonth: 이월 출처 월, disabled }
 function getAutoCarryover(child, year, month, depth = 0) {
-  const none = { amount: 0, fromMonth: null };
+  const none = { amount: 0, available: 0, fromMonth: null, disabled: false };
   if (!child || !year || !month || depth > 24) return none;
+  const disabled = !!data.monthlyFees[monthKey(year, month)]?.[child.id]?.autoCarryoverDisabled;
   const py = month === 1 ? year - 1 : year;
   const pm = month === 1 ? 12 : month - 1;
   // 대상자 등록 이전 달에서는 이월되지 않는다.
@@ -468,7 +470,8 @@ function getAutoCarryover(child, year, month, depth = 0) {
     (rec?.carryoverAmount || 0) +
     getExtraSubjectFee(child, rec) +
     getAutoCarryover(child, py, pm, depth + 1).amount;
-  return net < 0 ? { amount: net, fromMonth: pm } : none;
+  if (net >= 0) return { ...none, disabled };
+  return { amount: disabled ? 0 : net, available: net, fromMonth: pm, disabled };
 }
 
 function dateKey(date = new Date()) {
@@ -661,6 +664,7 @@ async function loadAllData() {
       carryoverAmount: row.carryover_amount || 0,
       extraSubjectEnabled: row.extra_subject_enabled || false,
       extraSessionCount: row.extra_session_count || 0,
+      autoCarryoverDisabled: row.auto_carryover_disabled || false,
       copayDepositDate: row.copay_deposit_date || '',
       copayAmount: row.copay_amount ?? null,
       copayPaid: row.copay_paid || false,
@@ -1886,6 +1890,7 @@ function getOrCreateFeeRecordForMonth(childId, year, month) {
       carryoverAmount: 0,
       extraSubjectEnabled: false,
       extraSessionCount: 0,
+      autoCarryoverDisabled: false,
       copayDepositDate: '',
       copayAmount: null,
       copayPaid: false,
@@ -1914,6 +1919,7 @@ async function persistFeeRecordForMonth(childId, year, month) {
       carryover_amount: rec.carryoverAmount || 0,
       extra_subject_enabled: rec.extraSubjectEnabled || false,
       extra_session_count: rec.extraSessionCount || 0,
+      auto_carryover_disabled: rec.autoCarryoverDisabled || false,
       copay_deposit_date: rec.copayDepositDate || null,
       copay_amount: rec.copayAmount ?? null,
       copay_paid: rec.copayPaid || false,
@@ -2608,11 +2614,14 @@ function renderFees() {
           </div>` : ''}
         </div>
 
-        ${autoCarry.amount < 0 ? `
+        ${autoCarry.available < 0 ? `
         <div class="fee-input-row">
-          <label>자동 이월금</label>
-          <strong class="fee-deduct">${formatSignedCurrency(autoCarry.amount)}</strong>
-          <span class="text-muted">(${autoCarry.fromMonth}월 이월금 · 지난달 추가납부액이 마이너스여서 자동 차감)</span>
+          <label class="paid-check">
+            <input type="checkbox" class="auto-carryover-toggle" ${autoCarry.disabled ? '' : 'checked'}>
+            자동 이월금 적용
+          </label>
+          <strong class="${autoCarry.disabled ? 'text-muted' : 'fee-deduct'}">${formatSignedCurrency(autoCarry.available)}</strong>
+          <span class="text-muted">(${autoCarry.fromMonth}월 이월금${autoCarry.disabled ? ' · 적용 안 함(환급 등)' : ''})</span>
         </div>` : ''}
 
         <div class="fee-input-row">
@@ -2669,6 +2678,12 @@ function renderFees() {
 
     card.querySelector('.session-count')?.addEventListener('change', async (e) => {
       getFeeRecord(cid).sessionCount = Math.max(0, Number(e.target.value) || 0);
+      await persistFeeRecord(cid);
+      renderFees();
+    });
+
+    card.querySelector('.auto-carryover-toggle')?.addEventListener('change', async (e) => {
+      getFeeRecord(cid).autoCarryoverDisabled = !e.target.checked;
       await persistFeeRecord(cid);
       renderFees();
     });
