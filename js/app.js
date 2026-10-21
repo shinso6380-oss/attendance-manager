@@ -228,12 +228,13 @@ function formatSignedMoneyInputValue(n) {
 
 function attachSignedMoneyInputFormatting(el) {
   el.addEventListener('input', () => {
-    const digits = el.value.replace(/[^\d-]/g, '');
-    if (digits === '' || digits === '-') {
-      el.value = digits;
+    // 이월 금액 조정은 항상 차감(-)이므로 입력 중에도 처음부터 마이너스로 보여준다.
+    const digits = el.value.replace(/\D/g, '');
+    if (digits === '') {
+      el.value = '';
       return;
     }
-    el.value = formatSignedCurrency(Number(digits) || 0);
+    el.value = formatSignedCurrency(-(Number(digits) || 0));
   });
 }
 
