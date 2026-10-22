@@ -2581,12 +2581,11 @@ function renderFees() {
   const monthChildren = getFeesMonthChildren();
 
   const statusByChild = {};
-  const counts = { all: monthChildren.length, unpaid: 0, paid: 0 };
+  const counts = { all: monthChildren.length, unpaid: 0, paid: 0, carryover: 0 };
   monthChildren.forEach((c) => {
     const st = getPaymentStatus(c, feeViewYear, feeViewMonth);
     statusByChild[c.id] = st;
-    if (st === 'unpaid') counts.unpaid++;
-    if (st === 'paid') counts.paid++;
+    if (st && counts[st] !== undefined) counts[st]++;
   });
   document.querySelectorAll('#feesStatusFilter [data-status]').forEach((btn) => {
     btn.classList.toggle('btn-primary', btn.dataset.status === feesStatusFilter);
