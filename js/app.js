@@ -187,7 +187,7 @@ function getVisibleChildren() {
   return data.children.filter((c) => c.teacher === currentUser.name);
 }
 
-// 관리자여도 본인 담당 대상자만 보여줘야 하는 화면(오늘 출석, 월 수업료 산정, 월 출석부)에서 사용
+// 관리자여도 본인 담당 대상자만 보여줘야 하는 화면(오늘 출석, 월 수업료 계산, 월 출석부)에서 사용
 function getOwnChildren() {
   if (!currentUser) return [];
   return data.children.filter((c) => c.teacher === currentUser.name);
@@ -433,7 +433,7 @@ function getOtherSubject(subjectKey) {
   return Object.keys(SUBJECTS).find((k) => k !== subjectKey) || subjectKey;
 }
 
-// 다과목 결제(담당 과목 외 추가)가 필요한 달에만 월 수업료 산정 화면에서 켜서 쓰는 금액.
+// 다과목 결제(담당 과목 외 추가)가 필요한 달에만 월 수업료 계산 화면에서 켜서 쓰는 금액.
 // 요일/시간표가 따로 없어 자동 회차 계산이 불가능하므로, 매달 직접 입력한 횟수(extraSessionCount) ×
 // 그 과목 요율로만 계산한다 (바우처 차감 등은 적용하지 않음).
 function getExtraSubjectFee(child, feeRec) {
@@ -566,7 +566,7 @@ function isChildActiveOn(child, date) {
   return !child.terminatedAt || dateKey(date) < child.terminatedAt;
 }
 
-// 그 달 1일에 이미 종결된 상태면 그 달 화면(수업료 산정/월 출석부)에서 제외한다. 종결 당월은 종결 전까지의 내용이 남아야 하므로 계속 보여준다.
+// 그 달 1일에 이미 종결된 상태면 그 달 화면(수업료 계산/월 출석부)에서 제외한다. 종결 당월은 종결 전까지의 내용이 남아야 하므로 계속 보여준다.
 function isChildActiveInMonth(child, year, month) {
   return isChildActiveOn(child, new Date(year, month - 1, 1));
 }
@@ -586,7 +586,7 @@ let childrenSortMode = 'recent';
 let openTeacherGroups = new Set(); // 대상자 관리에서 펼쳐놓은 선생님 구역(기본은 다 접힘)
 let journalSelectedChildId = null;
 let attendanceViewDate = new Date();
-let feesStatusFilter = 'all'; // 월 수업료 산정 납부 상태 필터: all / unpaid / paid
+let feesStatusFilter = 'all'; // 월 수업료 계산 납부 상태 필터: all / unpaid / paid
 let feesIncludedIds = new Set(); // 기본값: 아무도 선택 안 됨 (필요한 친구만 직접 선택)
 let depositViewYear = new Date().getFullYear();
 let depositViewMonth = new Date().getMonth() + 1;
@@ -3147,7 +3147,7 @@ function renderMonthlyAttendance() {
           : paymentStatus === 'carryover'
             ? '<span class="att-payment-badge paid">이월</span>'
             : '';
-      return `<tr><th class="att-name att-name-link" data-child="${c.id}" title="클릭하면 이 아이의 월 수업료 산정으로 이동합니다">${esc(c.name)}<span class="att-count">(${presentCount}회)</span>${badge}</th>${cellsHtml}</tr>`;
+      return `<tr><th class="att-name att-name-link" data-child="${c.id}" title="클릭하면 이 아이의 월 수업료 계산으로 이동합니다">${esc(c.name)}<span class="att-count">(${presentCount}회)</span>${badge}</th>${cellsHtml}</tr>`;
     })
     .join('');
 
@@ -3188,7 +3188,7 @@ function renderMonthlyAttendance() {
       const cid = th.dataset.child;
       // 이전에 클릭했던 다른 아이들은 안 보이게, 지금 클릭한 아이만 보이게 한다.
       feesIncludedIds = new Set([cid]);
-      // 지금 보고 있는 월 출석부와 같은 달의 수업료 산정 화면으로 이동한다 (다른 달이 열려 있으면 혼동되므로).
+      // 지금 보고 있는 월 출석부와 같은 달의 수업료 계산 화면으로 이동한다 (다른 달이 열려 있으면 혼동되므로).
       feeViewYear = attViewYear;
       feeViewMonth = attViewMonth;
       switchTab('fees');
