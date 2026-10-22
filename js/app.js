@@ -586,6 +586,7 @@ let childrenSortMode = 'recent';
 let openTeacherGroups = new Set(); // 대상자 관리에서 펼쳐놓은 선생님 구역(기본은 다 접힘)
 let journalSelectedChildId = null;
 let attendanceViewDate = new Date();
+let feesStatusFilter = 'all'; // 월 수업료 산정 납부 상태 필터: all / unpaid / paid
 let feesIncludedIds = new Set(); // 기본값: 아무도 선택 안 됨 (필요한 친구만 직접 선택)
 let depositViewYear = new Date().getFullYear();
 let depositViewMonth = new Date().getMonth() + 1;
@@ -839,8 +840,14 @@ function bindEvents() {
   });
 
   document.getElementById('btnFeesSelectAll').addEventListener('click', () => {
-    feesIncludedIds = new Set(getVisibleChildren().map((c) => c.id));
+    feesIncludedIds = new Set(getFeesFilteredChildren().map((c) => c.id));
     renderFees();
+  });
+  document.querySelectorAll('#feesStatusFilter [data-status]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      feesStatusFilter = btn.dataset.status;
+      renderFees();
+    });
   });
   document.getElementById('btnFeesSelectNone').addEventListener('click', () => {
     feesIncludedIds.clear();
@@ -2548,15 +2555,54 @@ async function captureFeeSummary(childId) {
   }
 }
 
+const FEE_STATUS_LABELS = { paid: '납부완료', unpaid: '미납', carryover: '이월' };
+
+function getFeesMonthChildren() {
+  return getOwnChildren().filter((c) => isChildActiveInMonth(c, feeViewYear, feeViewMonth));
+}
+
+// 납부 상태 필터(전체/미납/납부완료)에 맞는 대상자만 돌려준다.
+function getFeesFilteredChildren() {
+  const all = getFeesMonthChildren();
+  if (feesStatusFilter === 'all') return all;
+  return all.filter((c) => getPaymentStatus(c, feeViewYear, feeViewMonth) === feesStatusFilter);
+}
+
+function feeStatusMark(status) {
+  return FEE_STATUS_LABELS[status]
+    ? ` <span class="fee-status-mark fee-status-${status}">${FEE_STATUS_LABELS[status]}</span>`
+    : '';
+}
+
 function renderFees() {
   document.getElementById('feeMonthLabel').textContent = `${feeViewYear}년 ${feeViewMonth}월`;
   const list = document.getElementById('feesList');
   const checkboxWrap = document.getElementById('feesChildCheckboxes');
-  const allChildren = getOwnChildren().filter((c) => isChildActiveInMonth(c, feeViewYear, feeViewMonth));
+  const monthChildren = getFeesMonthChildren();
 
-  if (!allChildren.length) {
+  const statusByChild = {};
+  const counts = { all: monthChildren.length, unpaid: 0, paid: 0 };
+  monthChildren.forEach((c) => {
+    const st = getPaymentStatus(c, feeViewYear, feeViewMonth);
+    statusByChild[c.id] = st;
+    if (st === 'unpaid') counts.unpaid++;
+    if (st === 'paid') counts.paid++;
+  });
+  document.querySelectorAll('#feesStatusFilter [data-status]').forEach((btn) => {
+    btn.classList.toggle('btn-primary', btn.dataset.status === feesStatusFilter);
+    btn.querySelector('[data-count]').textContent = `(${counts[btn.dataset.status]})`;
+  });
+
+  const allChildren = feesStatusFilter === 'all' ? monthChildren : monthChildren.filter((c) => statusByChild[c.id] === feesStatusFilter);
+
+  if (!monthChildren.length) {
     checkboxWrap.innerHTML = '';
     list.innerHTML = '<p class="empty-msg">등록된 대상자가 없습니다.</p>';
+    return;
+  }
+  if (!allChildren.length) {
+    checkboxWrap.innerHTML = '';
+    list.innerHTML = `<p class="empty-msg">${FEE_STATUS_LABELS[feesStatusFilter]} 대상자가 없습니다.</p>`;
     return;
   }
 
@@ -2567,7 +2613,7 @@ function renderFees() {
       (c) => `
       <label class="day-check">
         <input type="checkbox" class="fees-child-checkbox" value="${c.id}" ${feesIncludedIds.has(c.id) ? 'checked' : ''}>
-        ${esc(c.name)}
+        ${esc(c.name)}${feeStatusMark(statusByChild[c.id])}
       </label>`
     )
     .join('');
@@ -2627,7 +2673,7 @@ function renderFees() {
       return `
       <div class="card fee-card" data-fee-child="${c.id}">
         <div class="fee-card-top">
-          <div class="child-name child-name-link" data-history="${c.id}">${esc(c.name)}</div>
+          <div class="child-name child-name-link" data-history="${c.id}">${esc(c.name)}${feeStatusMark(statusByChild[c.id])}</div>
           <button type="button" class="btn btn-sm capture-fee-btn">📸 이용료 캡쳐</button>
         </div>
         <div class="child-meta">

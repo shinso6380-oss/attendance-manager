@@ -383,6 +383,24 @@ body {
   border-radius: var(--radius);
 }
 
+.fees-status-filter {
+  display: flex;
+  gap: .5rem;
+  margin-bottom: .5rem;
+}
+
+.fee-status-mark {
+  display: inline-block;
+  margin-left: .25rem;
+  padding: .05rem .4rem;
+  border-radius: 999px;
+  font-size: .7rem;
+  font-weight: 600;
+}
+.fee-status-paid { background: #dcfce7; color: #166534; }
+.fee-status-unpaid { background: #fee2e2; color: #991b1b; }
+.fee-status-carryover { background: #dbeafe; color: #1e40af; }
+
 .fees-child-checkboxes {
   display: flex;
   flex-wrap: wrap;
