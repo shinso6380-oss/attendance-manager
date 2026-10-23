@@ -2315,7 +2315,7 @@ function renderCopayStatusList(copayChildren) {
     listEl.innerHTML = `
       <div class="payment-table-wrap">
         <table class="payment-table">
-          <thead><tr><th>이름</th><th>담당 선생님</th><th>본인부담금</th><th>입금액(일부)</th></tr></thead>
+          <thead><tr><th>이름</th><th>담당 선생님</th><th>본인부담금</th><th>입금액(일부)</th>${isAdmin() ? '<th>납부 처리</th>' : ''}</tr></thead>
           <tbody>
             ${unpaid
               .map(
@@ -2325,12 +2325,16 @@ function renderCopayStatusList(copayChildren) {
                 <td>${esc(child.teacher)}</td>
                 <td class="amount">${formatCurrency(fee.copay)}</td>
                 <td class="amount">${formatCurrency(feeRec.copayAmount || 0)}</td>
+                ${isAdmin() ? `<td><button type="button" class="btn btn-sm" data-copay-pay="${child.id}">현금·카드 납부 처리</button></td>` : ''}
               </tr>`
               )
               .join('')}
           </tbody>
         </table>
       </div>`;
+    listEl.querySelectorAll('[data-copay-pay]').forEach((btn) => {
+      btn.addEventListener('click', () => markCopayPaidManually(btn.dataset.copayPay, true));
+    });
     return;
   }
 
@@ -2341,7 +2345,7 @@ function renderCopayStatusList(copayChildren) {
   listEl.innerHTML = `
     <div class="payment-table-wrap">
       <table class="payment-table">
-        <thead><tr><th>이름</th><th>담당 선생님</th><th>본인부담금</th><th>입금액</th><th>납부일시</th></tr></thead>
+        <thead><tr><th>이름</th><th>담당 선생님</th><th>본인부담금</th><th>입금액</th><th>납부일시</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
         <tbody>
           ${paid
             .map(
@@ -2352,12 +2356,42 @@ function renderCopayStatusList(copayChildren) {
               <td class="amount">${formatCurrency(fee.copay)}</td>
               <td class="amount">${formatCurrency(feeRec.copayAmount ?? fee.copay)}</td>
               <td>${paidAtList.length ? paidAtList.map(esc).join('<br>') : '-'}</td>
+              ${isAdmin() ? `<td><button type="button" class="btn btn-sm" data-copay-cancel="${child.id}">납부 취소</button></td>` : ''}
             </tr>`
             )
             .join('')}
         </tbody>
       </table>
     </div>`;
+  listEl.querySelectorAll('[data-copay-cancel]').forEach((btn) => {
+    btn.addEventListener('click', () => markCopayPaidManually(btn.dataset.copayCancel, false));
+  });
+}
+
+// 통장 입금이 아니라 현금·카드로 낸 본인부담금을 관리자가 직접 납부 처리(또는 취소)한다.
+// 납부 처리하면 입금일이 비어 있을 때 오늘 날짜가 들어가고, 입금액이 부족하면 본인부담금 전액으로 채운다.
+async function markCopayPaidManually(childId, paid) {
+  const child = data.children.find((c) => String(c.id) === String(childId));
+  if (!child || !isAdmin()) return;
+  const monthLabel = `${depositViewYear}년 ${depositViewMonth}월`;
+  const message = paid
+    ? `${child.name}의 ${monthLabel} 본인부담금을 현금·카드 등 통장 외 방식으로 납부한 것으로 처리할까요?`
+    : `${child.name}의 ${monthLabel} 본인부담금 납부 확인을 취소하고 미납으로 되돌릴까요?`;
+  if (!confirm(message)) return;
+
+  const rec = getOrCreateFeeRecordForMonth(child.id, depositViewYear, depositViewMonth);
+  if (paid) {
+    const fee = calculateMonthlyFee(child, rec.sessionCount);
+    rec.copayPaid = true;
+    if (!rec.copayDepositDate) rec.copayDepositDate = dateKey();
+    if ((rec.copayAmount || 0) < fee.copay) rec.copayAmount = fee.copay;
+  } else {
+    rec.copayPaid = false;
+  }
+  const ok = await persistFeeRecordForMonth(child.id, depositViewYear, depositViewMonth);
+  if (!ok) return;
+  renderDeposits();
+  renderFees();
 }
 
 function exportUnpaidCopayExcel() {
