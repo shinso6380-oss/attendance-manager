@@ -239,9 +239,29 @@ function attachSignedMoneyInputFormatting(el) {
   });
 }
 
-function generateTimeOptions(stepMinutes = 10) {
+// 수업 시작 시간 선택 목록: 오전 8시부터 오후 8시(마지막 수업 시작 시각)까지.
+const CLASS_START_FIRST_HOUR = 8;
+const CLASS_START_LAST_MINUTES = 20 * 60;
+
+// "13:30" -> "오후 1:30" (선택 목록에서만 쓰는 표기, 저장값은 계속 24시간제 "HH:MM")
+function formatTimeLabel(t) {
+  const [h, m] = String(t).split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return String(t);
+  const period = h < 12 ? '오전' : '오후';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${period} ${h12}:${String(m).padStart(2, '0')}`;
+}
+
+// "14:00","14:40" -> "오후 2:00~2:40" (같은 오전/오후면 뒤쪽 표기는 생략, 걸치면 "오전 11:30~오후 12:10")
+function formatTimeRangeLabel(start, end) {
+  const s = formatTimeLabel(start);
+  const e = formatTimeLabel(end);
+  return s.split(' ')[0] === e.split(' ')[0] ? `${s}~${e.split(' ')[1]}` : `${s}~${e}`;
+}
+
+function generateTimeOptions(stepMinutes = 10, startHour = CLASS_START_FIRST_HOUR, lastMinutes = CLASS_START_LAST_MINUTES) {
   const options = [];
-  for (let m = 0; m < 24 * 60; m += stepMinutes) {
+  for (let m = startHour * 60; m <= lastMinutes; m += stepMinutes) {
     const hh = String(Math.floor(m / 60)).padStart(2, '0');
     const mm = String(m % 60).padStart(2, '0');
     options.push(`${hh}:${mm}`);
@@ -270,7 +290,7 @@ function getDayTimeLabel(child) {
     .map((d) => {
       const label = DAYS.find((day) => day.value === d)?.label;
       const time = (child.dayTimes?.[d] || '').slice(0, 5);
-      return time ? `${label} ${time}` : label;
+      return time ? `${label} ${formatTimeLabel(time)}` : label;
     })
     .join(', ');
 }
@@ -755,14 +775,14 @@ function populateSubjectSelect(teacherName) {
 
 function renderDayTimeRows(container = document.getElementById('dayTimeRows'), dayTimes = {}) {
   const scheduleDays = DAYS.slice(1); // 월~토 (일요일 제외)
-  const baseOptions = generateTimeOptions(10);
+  const baseOptions = generateTimeOptions();
   container.innerHTML = scheduleDays
     .map((d) => {
       const checked = dayTimes[d.value] !== undefined;
       const time = dayTimes[d.value] || '14:00';
-      // 10분 단위가 아닌 옛 시간값도 목록에 끼워 넣어 수정 시 값이 사라지지 않게 함
+      // 10분 단위가 아니거나 선택 범위(오전 8시~오후 8시) 밖인 옛 시간값도 목록에 끼워 넣어 수정 시 값이 사라지지 않게 함
       const options = baseOptions.includes(time) ? baseOptions : [...baseOptions, time].sort();
-      const optionsHtml = options.map((t) => `<option value="${t}" ${t === time ? 'selected' : ''}>${t}</option>`).join('');
+      const optionsHtml = options.map((t) => `<option value="${t}" ${t === time ? 'selected' : ''}>${formatTimeLabel(t)}</option>`).join('');
       return `
       <div class="day-time-row">
         <label class="day-check">
@@ -1716,7 +1736,7 @@ function renderAttendance() {
   }
   empty.classList.add('hidden');
 
-  const makeupTimeOptions = generateTimeOptions(10);
+  const makeupTimeOptions = generateTimeOptions();
 
   // 시간대별로 묶어서 보여준다. 정규 시간이 없는(아직 시간 미지정) 보강 인원은 맨 뒤 "시간 미정" 묶음으로.
   const groups = new Map(); // time(''=미정) -> children[]
@@ -1735,7 +1755,7 @@ function renderAttendance() {
 
   list.innerHTML = sortedTimes
     .map((time) => {
-      const groupLabel = time ? time.slice(0, 5) : '시간 미정';
+      const groupLabel = time ? formatTimeLabel(time.slice(0, 5)) : '시간 미정';
       const cardsHtml = groups
         .get(time)
         .map((c) => {
@@ -1746,9 +1766,9 @@ function renderAttendance() {
           const timeDisplay = isMakeup
             ? `<select class="makeup-time-select">
                 <option value="">시간 선택</option>
-                ${makeupTimeOptions.map((t) => `<option value="${t}" ${t === record.makeupTime ? 'selected' : ''}>${t}</option>`).join('')}
+                ${(record.makeupTime && !makeupTimeOptions.includes(record.makeupTime) ? [record.makeupTime, ...makeupTimeOptions].sort() : makeupTimeOptions).map((t) => `<option value="${t}" ${t === record.makeupTime ? 'selected' : ''}>${formatTimeLabel(t)}</option>`).join('')}
               </select>`
-            : esc((c.dayTimes?.[todayDow] || '').slice(0, 5));
+            : esc(c.dayTimes?.[todayDow] ? formatTimeLabel(c.dayTimes[todayDow].slice(0, 5)) : '');
           const countValue = record.count ?? 1;
           const countSelect = `<select class="present-count-select" ${isPresent ? '' : 'disabled'} title="이 날 출석 횟수 (하루 2번 오면 2, 20분씩 나눠 오면 0.5)">
               ${PRESENT_COUNT_OPTIONS.map((v) => `<option value="${v}" ${v === countValue ? 'selected' : ''}>${v}회</option>`).join('')}
@@ -2941,7 +2961,7 @@ function renderSchedule() {
           return `<td><div class="${gridClass}">${content}</div></td>`;
         })
         .join('');
-      return `<tr><th>${t.slice(0, 5)}~${end}</th>${cells}</tr>`;
+      return `<tr><th>${formatTimeRangeLabel(t.slice(0, 5), end)}</th>${cells}</tr>`;
     })
     .join('');
 
@@ -2993,7 +3013,7 @@ function exportScheduleExcel() {
     const startRow = aoa.length;
 
     for (let sub = 0; sub < maxKids; sub++) {
-      const row = [sub === 0 ? `${t.slice(0, 5)}~${end}` : ''];
+      const row = [sub === 0 ? formatTimeRangeLabel(t.slice(0, 5), end) : ''];
       kidsByDay.forEach((kids, colIdx) => {
         const c = kids[sub];
         if (!c) {
