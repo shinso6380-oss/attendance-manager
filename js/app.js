@@ -692,7 +692,7 @@ async function loadAllData() {
   data.monthlyFees = {};
   (feesRes.data || []).forEach((row) => {
     if (!data.monthlyFees[row.month_key]) data.monthlyFees[row.month_key] = {};
-    data.monthlyFees[row.month_key][row.child_id] = {
+    const feeRec = {
       sessionCount: row.session_count,
       additionalDepositDate: row.additional_deposit_date || '',
       additionalAmount: row.additional_amount ?? null,
@@ -707,6 +707,8 @@ async function loadAllData() {
       copayPaid: row.copay_paid || false,
       notes: row.notes || '',
     };
+    feeRec._saved = feeRecToRow(row.child_id, row.month_key, feeRec);
+    data.monthlyFees[row.month_key][row.child_id] = feeRec;
   });
 
   data.teachers = (pwRes.data || []).map((row) => ({
@@ -927,6 +929,7 @@ function bindEvents() {
   });
   document.getElementById('btnExportUnpaidExcel').addEventListener('click', exportUnpaidCopayExcel);
   document.getElementById('btnCopyUnpaidNames').addEventListener('click', copyUnpaidCopayNames);
+  document.getElementById('btnReapplyDeposits').addEventListener('click', reapplyMatchedDeposits);
   document.getElementById('btnDepositModeUnpaid').addEventListener('click', () => {
     depositListMode = 'unpaid';
     renderDeposits();
@@ -1948,34 +1951,53 @@ function getFeeRecord(childId) {
   return getOrCreateFeeRecordForMonth(childId, feeViewYear, feeViewMonth);
 }
 
+function feeRecToRow(childId, mk, rec) {
+  return {
+    child_id: childId,
+    month_key: mk,
+    session_count: rec.sessionCount,
+    additional_deposit_date: rec.additionalDepositDate || null,
+    additional_amount: rec.additionalAmount ?? null,
+    additional_paid: rec.additionalPaid || false,
+    additional_payment_method: rec.additionalPaymentMethod || null,
+    carryover_amount: rec.carryoverAmount || 0,
+    extra_subject_enabled: rec.extraSubjectEnabled || false,
+    extra_session_count: rec.extraSessionCount || 0,
+    auto_carryover_disabled: rec.autoCarryoverDisabled || false,
+    copay_deposit_date: rec.copayDepositDate || null,
+    copay_amount: rec.copayAmount ?? null,
+    copay_paid: rec.copayPaid || false,
+    notes: rec.notes || '',
+  };
+}
+
+// 마지막으로 불러오거나 저장한 값(_saved)과 달라진 칸만 저장한다. 다른 사람이 그사이 바꾼 칸(예: 엑셀 입금 반영)을
+// 오래된 화면 값으로 덮어쓰지 않기 위해서다. DB에 아직 없는 새 기록은 전체를 저장한다.
 async function persistFeeRecordForMonth(childId, year, month) {
   const mk = monthKey(year, month);
   const rec = getOrCreateFeeRecordForMonth(childId, year, month);
-  const { error } = await supabaseClient.from('monthly_fees').upsert(
-    {
-      child_id: childId,
-      month_key: mk,
-      session_count: rec.sessionCount,
-      additional_deposit_date: rec.additionalDepositDate || null,
-      additional_amount: rec.additionalAmount ?? null,
-      additional_paid: rec.additionalPaid || false,
-      additional_payment_method: rec.additionalPaymentMethod || null,
-      carryover_amount: rec.carryoverAmount || 0,
-      extra_subject_enabled: rec.extraSubjectEnabled || false,
-      extra_session_count: rec.extraSessionCount || 0,
-      auto_carryover_disabled: rec.autoCarryoverDisabled || false,
-      copay_deposit_date: rec.copayDepositDate || null,
-      copay_amount: rec.copayAmount ?? null,
-      copay_paid: rec.copayPaid || false,
-      notes: rec.notes || '',
-    },
-    { onConflict: 'child_id,month_key' }
-  );
+  const full = feeRecToRow(childId, mk, rec);
+  let payload = full;
+  if (rec._saved) {
+    payload = { child_id: childId, month_key: mk };
+    let changed = false;
+    Object.keys(full).forEach((k) => {
+      if (k === 'child_id' || k === 'month_key') return;
+      if (full[k] !== rec._saved[k]) {
+        payload[k] = full[k];
+        changed = true;
+      }
+    });
+    if (!changed) return true;
+  }
+  const { error } = await supabaseClient.from('monthly_fees').upsert(payload, { onConflict: 'child_id,month_key' });
   if (error) {
     console.error(error);
     alert('수업료 정보 저장 중 오류가 발생했습니다.');
+    return false;
   }
-  return !error;
+  rec._saved = full;
+  return true;
 }
 
 async function persistFeeRecord(childId) {
@@ -2268,6 +2290,49 @@ function renderDeposits() {
 // DB의 timestamptz는 은행 거래시각을 그대로 저장한 값이라, 시간대 변환 없이 문자열만 잘라서 보여준다.
 function formatDepositDateTime(iso) {
   return String(iso || '').replace('T', ' ').slice(0, 16);
+}
+
+// 엑셀로 "매칭 완료"된 입금인데 월 수업료 기록(본인부담금 입금액·입금일·납부확인)에 반영이 빠진 건을 찾아 다시 채운다.
+// 이미 기록된 금액이 입금 합계 이상이면 건드리지 않는다.
+async function reapplyMatchedDeposits() {
+  if (!confirm('엑셀로 매칭된 입금 중 월 수업료 계산에 반영이 안 된 건을 찾아 다시 반영할까요?')) return;
+  try {
+    await loadAllData();
+    await loadDeposits();
+  } catch (err) {
+    console.error(err);
+    alert('최신 데이터를 불러오지 못했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.');
+    return;
+  }
+
+  const sums = {};
+  depositRows
+    .filter((d) => d.status === 'matched' && d.matched_child_id && d.matched_month_key)
+    .forEach((d) => {
+      const k = `${d.matched_child_id}|${d.matched_month_key}`;
+      if (!sums[k]) sums[k] = { sum: 0, firstDate: d.txn_date };
+      sums[k].sum += Number(d.amount) || 0;
+      if (d.txn_date < sums[k].firstDate) sums[k].firstDate = d.txn_date;
+    });
+
+  const fixed = [];
+  for (const [k, { sum, firstDate }] of Object.entries(sums)) {
+    const [cid, mk] = k.split('|');
+    const child = data.children.find((c) => String(c.id) === cid);
+    if (!child) continue;
+    const [y, m] = mk.split('-').map(Number);
+    const rec = getOrCreateFeeRecordForMonth(child.id, y, m);
+    if ((rec.copayAmount || 0) >= sum) continue;
+    rec.copayAmount = sum;
+    if (!rec.copayDepositDate) rec.copayDepositDate = firstDate;
+    const fee = calculateMonthlyFee(child, rec.sessionCount);
+    if (fee.copay > 0 && rec.copayAmount >= fee.copay) rec.copayPaid = true;
+    if (await persistFeeRecordForMonth(child.id, y, m)) fixed.push(`${child.name} (${m}월)`);
+  }
+
+  renderDeposits();
+  renderFees();
+  alert(fixed.length ? `${fixed.length}건을 다시 반영했습니다.\n${fixed.join(', ')}` : '다시 반영할 건이 없습니다.');
 }
 
 // 카톡에 바로 붙여넣을 수 있게 "N월 발달재활 본인부담금 미납" 제목 아래 이름만 한 줄씩 복사한다. 전체 선생님 담당 아이가 대상이다.
