@@ -2400,7 +2400,7 @@ function renderCopayStatusList(copayChildren) {
     listEl.innerHTML = `
       <div class="payment-table-wrap">
         <table class="payment-table">
-          <thead><tr><th>이름</th><th>담당 선생님</th><th>본인부담금</th><th>입금액(일부)</th>${isAdmin() ? '<th>납부 처리</th>' : ''}</tr></thead>
+          <thead><tr><th>이름</th><th>담당 선생님</th><th>본인부담금</th><th>입금액(일부)</th>${isAdmin() ? '<th>납부 금액</th><th>납부일</th><th>납부 처리</th>' : ''}</tr></thead>
           <tbody>
             ${unpaid
               .map(
@@ -2410,15 +2410,30 @@ function renderCopayStatusList(copayChildren) {
                 <td>${esc(child.teacher)}</td>
                 <td class="amount">${formatCurrency(fee.copay)}</td>
                 <td class="amount">${formatCurrency(feeRec.copayAmount || 0)}</td>
-                ${isAdmin() ? `<td><button type="button" class="btn btn-sm" data-copay-pay="${child.id}">현금·카드 납부 처리</button></td>` : ''}
+                ${
+                  isAdmin()
+                    ? `<td><input type="text" inputmode="numeric" class="copay-manual-amount" data-copay-amount="${child.id}" value="${esc(formatCurrency(fee.copay))}" style="width:7.5rem"></td>
+                <td><input type="date" class="copay-manual-date" data-copay-date="${child.id}" value="${esc(feeRec.copayDepositDate || dateKey())}"></td>
+                <td><button type="button" class="btn btn-sm" data-copay-pay="${child.id}">납부 처리</button></td>`
+                    : ''
+                }
               </tr>`
               )
               .join('')}
           </tbody>
         </table>
       </div>`;
+    listEl.querySelectorAll('[data-copay-amount]').forEach(attachMoneyInputFormatting);
     listEl.querySelectorAll('[data-copay-pay]').forEach((btn) => {
-      btn.addEventListener('click', () => markCopayPaidManually(btn.dataset.copayPay, true));
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.copayPay;
+        const amountEl = listEl.querySelector(`[data-copay-amount="${id}"]`);
+        const dateEl = listEl.querySelector(`[data-copay-date="${id}"]`);
+        markCopayPaidManually(id, true, {
+          amount: parseMoneyInputValue(amountEl.value),
+          date: dateEl.value,
+        });
+      });
     });
     return;
   }
@@ -2454,22 +2469,38 @@ function renderCopayStatusList(copayChildren) {
 }
 
 // 통장 입금이 아니라 현금·카드로 낸 본인부담금을 관리자가 직접 납부 처리(또는 취소)한다.
-// 납부 처리하면 입금일이 비어 있을 때 오늘 날짜가 들어가고, 입금액이 부족하면 본인부담금 전액으로 채운다.
-async function markCopayPaidManually(childId, paid) {
+// 납부 처리 시 관리자가 입력한 납부 금액·납부일이 그대로 기록된다. 금액이 본인부담금보다 적으면 일부 입금으로만 저장하고 미납으로 남긴다.
+async function markCopayPaidManually(childId, paid, input = {}) {
   const child = data.children.find((c) => String(c.id) === String(childId));
   if (!child || !isAdmin()) return;
   const monthLabel = `${depositViewYear}년 ${depositViewMonth}월`;
-  const message = paid
-    ? `${child.name}의 ${monthLabel} 본인부담금을 현금·카드 등 통장 외 방식으로 납부한 것으로 처리할까요?`
-    : `${child.name}의 ${monthLabel} 본인부담금 납부 확인을 취소하고 미납으로 되돌릴까요?`;
+  const rec = getOrCreateFeeRecordForMonth(child.id, depositViewYear, depositViewMonth);
+  const fee = calculateMonthlyFee(child, rec.sessionCount);
+
+  let amount = 0;
+  let date = '';
+  let isFull = true;
+  let message;
+  if (paid) {
+    amount = input.amount ?? fee.copay;
+    date = input.date || dateKey();
+    if (!(amount > 0)) {
+      alert('납부 금액을 입력해 주세요.');
+      return;
+    }
+    isFull = amount >= fee.copay;
+    message = isFull
+      ? `${child.name}의 ${monthLabel} 본인부담금 ${formatCurrency(amount)}을(를) ${date}에 납부한 것으로 처리할까요?`
+      : `${child.name}의 입금액 ${formatCurrency(amount)}은(는) 본인부담금 ${formatCurrency(fee.copay)}보다 적습니다.\n일부 입금(${date})으로만 기록하고 미납으로 남길까요?`;
+  } else {
+    message = `${child.name}의 ${monthLabel} 본인부담금 납부 확인을 취소하고 미납으로 되돌릴까요?`;
+  }
   if (!confirm(message)) return;
 
-  const rec = getOrCreateFeeRecordForMonth(child.id, depositViewYear, depositViewMonth);
   if (paid) {
-    const fee = calculateMonthlyFee(child, rec.sessionCount);
-    rec.copayPaid = true;
-    if (!rec.copayDepositDate) rec.copayDepositDate = dateKey();
-    if ((rec.copayAmount || 0) < fee.copay) rec.copayAmount = fee.copay;
+    rec.copayAmount = amount;
+    rec.copayDepositDate = date;
+    rec.copayPaid = isFull;
   } else {
     rec.copayPaid = false;
   }
