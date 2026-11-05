@@ -25,6 +25,7 @@ const PAYMENT_TYPES = {
   'edu-afterschool': '교육청 방과 후',
   'edu-umter': '교육청 움터',
   sports: '스포츠바우처',
+  'initial-consult': '초기 상담',
 };
 
 const PAYMENT_METHODS = {
@@ -42,7 +43,10 @@ const SCHEDULE_VOUCHER_LABELS = {
   sports: '스포츠',
 };
 
-const PAYMENT_TYPE_OPTIONS = ['developmental', 'infant', 'edu-therapy', 'edu-afterschool', 'edu-umter', 'sports'];
+const PAYMENT_TYPE_OPTIONS = ['developmental', 'infant', 'edu-therapy', 'edu-afterschool', 'edu-umter', 'sports', 'initial-consult'];
+
+// 초기 상담만 받고 가시는 분께 1회성으로 받는 상담비. 상담일이 속한 달의 추가납부액에만 더해진다.
+const INITIAL_CONSULT_FEE = 50000;
 
 const DEVELOPMENTAL_SUBTYPES = {
   ga: { label: '가형', copay: 20000 },
@@ -259,6 +263,28 @@ function formatTimeRangeLabel(start, end) {
   return s.split(' ')[0] === e.split(' ')[0] ? `${s}~${e.split(' ')[1]}` : `${s}~${e}`;
 }
 
+// 시간표는 "시" 단위로 묶어서 보여준다. "15:30" -> 행 기준 "15:00", 칸 안 표기 "30분"(정각이면 표시 안 함).
+function getScheduleHourKey(t) {
+  return `${String(t).slice(0, 2)}:00`;
+}
+
+function formatHourLabel(hourKey) {
+  const h = Number(String(hourKey).slice(0, 2));
+  return `${h < 12 ? '오전' : '오후'} ${h % 12 === 0 ? 12 : h % 12}시`;
+}
+
+function formatMinuteInHourLabel(t) {
+  const m = Number(String(t).slice(3, 5));
+  return m === 0 ? '' : `${m}분`;
+}
+
+// 같은 요일·같은 시(時)에 시작하는 아이들을 시작 시각 순 → 이름 순으로 돌려준다.
+function getScheduleKidsInHour(children, dayValue, hourKey) {
+  return children
+    .filter((c) => c.dayTimes[dayValue] && getScheduleHourKey(c.dayTimes[dayValue]) === hourKey)
+    .sort((a, b) => a.dayTimes[dayValue].localeCompare(b.dayTimes[dayValue]) || a.name.localeCompare(b.name, 'ko'));
+}
+
 function generateTimeOptions(stepMinutes = 10, startHour = CLASS_START_FIRST_HOUR, lastMinutes = CLASS_START_LAST_MINUTES) {
   const options = [];
   for (let m = startHour * 60; m <= lastMinutes; m += stepMinutes) {
@@ -465,7 +491,25 @@ function getExtraSubjectFee(child, feeRec) {
 // 이월 금액 조정은 추가납부액에서만 반영하고 본인부담금(copay)에는 영향을 주지 않는다.
 // 양수 = 이번 달에 더 받아야 함(가산), 음수 = 이번 달에서 차감.
 function getNetAdditionalPayment(fee, feeRec, child, year, month) {
-  return fee.additionalPayment + (feeRec?.carryoverAmount || 0) + getExtraSubjectFee(child, feeRec) + getAutoCarryover(child, year, month).amount;
+  return (
+    fee.additionalPayment +
+    getInitialConsultFee(child, year, month) +
+    (feeRec?.carryoverAmount || 0) +
+    getExtraSubjectFee(child, feeRec) +
+    getAutoCarryover(child, year, month).amount
+  );
+}
+
+// 초기 상담비가 청구되는 달("YYYY-MM"). 상담일을 안 적은 경우 대상자 등록일이 속한 달로 본다.
+function getInitialConsultMonthKey(child) {
+  if (!child?.paymentTypes?.includes('initial-consult')) return '';
+  if (child.initialConsultDate) return child.initialConsultDate.slice(0, 7);
+  return child.createdAt ? dateKey(new Date(child.createdAt)).slice(0, 7) : '';
+}
+
+function getInitialConsultFee(child, year, month) {
+  const mk = getInitialConsultMonthKey(child);
+  return mk && mk === monthKey(year, month) ? INITIAL_CONSULT_FEE : 0;
 }
 
 // 지난달 추가납부액이 마이너스(바우처 차감이 총 금액보다 큼)였다면 그 금액이 이번 달로 자동 이월된다.
@@ -488,6 +532,7 @@ function getAutoCarryover(child, year, month, depth = 0) {
   const fee = calculateMonthlyFee(child, sessionCount);
   const net =
     fee.additionalPayment +
+    getInitialConsultFee(child, py, pm) +
     (rec?.carryoverAmount || 0) +
     getExtraSubjectFee(child, rec) +
     getAutoCarryover(child, py, pm, depth + 1).amount;
@@ -548,6 +593,7 @@ function rowToChild(row) {
     paymentTypes: row.payment_types || [],
     developmentalSub: row.developmental_sub || '',
     infantSub: row.infant_sub || '',
+    initialConsultDate: row.initial_consult_date || '',
     days,
     dayTimes,
     depositorNames: row.depositor_names || [],
@@ -559,7 +605,7 @@ function rowToChild(row) {
 
 function childToRow(child) {
   const days = Object.keys(child.dayTimes || {}).map(Number);
-  return {
+  const row = {
     name: child.name,
     birth_date: child.birthDate || null,
     teacher: child.teacher,
@@ -574,6 +620,9 @@ function childToRow(child) {
     terminated_at: child.terminatedAt || null,
     terminated_reason: child.terminatedReason || null,
   };
+  // 초기 상담 칼럼은 초기 상담 대상자일 때만 보낸다 (SQL 실행 전에도 다른 대상자 저장이 막히지 않게).
+  if (child.paymentTypes.includes('initial-consult')) row.initial_consult_date = child.initialConsultDate || null;
+  return row;
 }
 
 // 종결 처리일이 지정되지 않았거나 아직 그 날이 되지 않았으면 오늘 기준 활성 상태로 본다.
@@ -1411,6 +1460,11 @@ function updateVoucherSubFields() {
     infField.hidden = true;
     infOptions.innerHTML = '';
   }
+
+  const consultField = document.getElementById('initialConsultField');
+  const consultInput = childForm.querySelector('[name="initialConsultDate"]');
+  consultField.hidden = !checkedTypes.includes('initial-consult');
+  if (!consultField.hidden && !consultInput.value) consultInput.value = dateKey();
 }
 
 function renderRadioGroup(name, subtypes, selected, showCopay) {
@@ -1437,6 +1491,7 @@ function openChildModal(child = null) {
     childForm.querySelector('[name="depositorNames"]').value = (child.depositorNames || []).join(', ');
     childForm.querySelector('[name="terminatedAt"]').value = child.terminatedAt || '';
     childForm.querySelector('[name="terminatedReason"]').value = child.terminatedReason || '';
+    childForm.querySelector('[name="initialConsultDate"]').value = child.initialConsultDate || '';
     teacherSel.value = child.teacher;
     populateSubjectSelect(child.teacher);
     childForm.querySelector('[name="subject"]').value = child.subject;
@@ -1483,12 +1538,18 @@ async function handleChildSubmit(e) {
     dayTimes[day] = timeInput.value || '14:00';
   });
 
-  if (!Object.keys(dayTimes).length) {
+  const paymentTypes = [...childForm.querySelectorAll('[name="paymentTypes"]:checked')].map((el) => el.value);
+
+  // 초기 상담만 받는 분은 정해진 요일이 없어도 된다 (상담 당일 오늘 출석의 "보강 인원 추가"로 부른다).
+  if (!Object.keys(dayTimes).length && !paymentTypes.includes('initial-consult')) {
     alert('수업 요일을 하나 이상 선택해 주세요.');
     return;
   }
-
-  const paymentTypes = [...childForm.querySelectorAll('[name="paymentTypes"]:checked')].map((el) => el.value);
+  const initialConsultDate = paymentTypes.includes('initial-consult') ? String(fd.get('initialConsultDate') || '') : '';
+  if (paymentTypes.includes('initial-consult') && !initialConsultDate) {
+    alert('초기 상담일을 선택해 주세요.');
+    return;
+  }
   const developmentalSub = fd.get('developmentalSub') || '';
   const infantSub = fd.get('infantSub') || '';
 
@@ -1518,6 +1579,7 @@ async function handleChildSubmit(e) {
     paymentTypes,
     developmentalSub: paymentTypes.includes('developmental') ? developmentalSub : '',
     infantSub: paymentTypes.includes('infant') ? infantSub : '',
+    initialConsultDate,
     dayTimes,
     days: Object.keys(dayTimes).map(Number),
     depositorNames,
@@ -2583,6 +2645,12 @@ async function captureFeeSummary(childId) {
       deduct: true,
     });
   });
+  const consultFee = getInitialConsultFee(child, feeViewYear, feeViewMonth);
+  if (consultFee > 0) {
+    // 상담만 받은 달에는 "총 금액 0원" 줄이 헷갈리므로 뺀다.
+    if (fee.baseTotal === 0) infoRows.shift();
+    infoRows.push({ label: '초기 상담비', sub: '1회성', value: `+${formatCurrency(consultFee)}` });
+  }
   if (autoCarry.amount < 0) {
     infoRows.push({ label: `${autoCarry.fromMonth}월 이월금 차감`, value: `-${formatCurrency(-autoCarry.amount)}`, deduct: true });
   }
@@ -2707,8 +2775,21 @@ async function captureFeeSummary(childId) {
 
 const FEE_STATUS_LABELS = { paid: '납부완료', unpaid: '미납', carryover: '이월' };
 
+// 요일 없이 초기 상담만 받은 분은 상담비를 청구하는 달에만 보여준다.
+// 상담 이후 달에는 상담비가 아직 미납일 때만 계속 보여서 미납이 잊히지 않게 한다.
+function isHiddenConsultOnlyChild(c, year, month) {
+  const consultMk = getInitialConsultMonthKey(c);
+  if (!consultMk || c.days?.length) return false;
+  const mk = monthKey(year, month);
+  if (mk === consultMk) return false;
+  if (mk < consultMk) return true;
+  return !!data.monthlyFees[consultMk]?.[c.id]?.additionalPaid;
+}
+
 function getFeesMonthChildren() {
-  return getOwnChildren().filter((c) => isChildActiveInMonth(c, feeViewYear, feeViewMonth));
+  return getOwnChildren().filter(
+    (c) => isChildActiveInMonth(c, feeViewYear, feeViewMonth) && !isHiddenConsultOnlyChild(c, feeViewYear, feeViewMonth)
+  );
 }
 
 // 납부 상태 필터(전체/미납/납부완료)에 맞는 대상자만 돌려준다.
@@ -2867,6 +2948,11 @@ function renderFees() {
           <div class="fee-item">
             <div class="label">7회차 이후 추가금</div>
             <div class="value">+${formatCurrency(fee.extra7Amount)}</div>
+          </div>` : ''}
+          ${getInitialConsultFee(c, feeViewYear, feeViewMonth) > 0 ? `
+          <div class="fee-item">
+            <div class="label">초기 상담비 <span class="fee-deduct-labels">(1회성)</span></div>
+            <div class="value">+${formatCurrency(getInitialConsultFee(c, feeViewYear, feeViewMonth))}</div>
           </div>` : ''}
         </div>
 
@@ -3031,14 +3117,13 @@ function renderSchedule() {
     return;
   }
 
-  const times = [...new Set(children.flatMap((c) => Object.values(c.dayTimes).filter(Boolean)))].sort();
+  const hours = [...new Set(children.flatMap((c) => Object.values(c.dayTimes).filter(Boolean).map(getScheduleHourKey)))].sort();
 
-  const rows = times
-    .map((t) => {
-      const end = addMinutesToTime(t, CLASS_DURATION_MIN);
+  const rows = hours
+    .map((hourKey) => {
       const cells = scheduleDays
         .map((d) => {
-          const kids = children.filter((c) => c.dayTimes[d.value] === t).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+          const kids = getScheduleKidsInHour(children, d.value, hourKey);
           const content = kids
             .map((c) => {
               const voucherTags = c.paymentTypes?.length
@@ -3046,8 +3131,10 @@ function renderSchedule() {
                     .map((pt) => `<span class="voucher-tag voucher-tag-${pt}">${esc(SCHEDULE_VOUCHER_LABELS[pt] || PAYMENT_TYPES[pt] || pt)}</span>`)
                     .join('')
                 : `<span class="voucher-tag">${esc(PAYMENT_TYPES.none)}</span>`;
+              const minLabel = formatMinuteInHourLabel(c.dayTimes[d.value]);
               return `
               <div class="schedule-child">
+                ${minLabel ? `<span class="schedule-min">${minLabel}</span>` : ''}
                 ${esc(c.name)}
                 <span class="schedule-meta">${voucherTags}</span>
               </div>`;
@@ -3057,7 +3144,7 @@ function renderSchedule() {
           return `<td><div class="${gridClass}">${content}</div></td>`;
         })
         .join('');
-      return `<tr><th>${formatTimeRangeLabel(t.slice(0, 5), end)}</th>${cells}</tr>`;
+      return `<tr><th>${formatHourLabel(hourKey)}</th>${cells}</tr>`;
     })
     .join('');
 
@@ -3089,7 +3176,7 @@ function exportScheduleExcel() {
     return;
   }
 
-  const times = [...new Set(children.flatMap((c) => Object.values(c.dayTimes).filter(Boolean)))].sort();
+  const hours = [...new Set(children.flatMap((c) => Object.values(c.dayTimes).filter(Boolean).map(getScheduleHourKey)))].sort();
   const title = `${currentUser?.name || ''} 시간표 (월~토)`;
   const totalCols = scheduleDays.length + 1;
 
@@ -3100,16 +3187,13 @@ function exportScheduleExcel() {
   const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } }];
   const fillByAddr = {}; // '{row}:{col}' -> fgColor rgb (한 칸에 한 명씩 넣어 사람마다 색이 안 겹치게 함)
 
-  times.forEach((t) => {
-    const end = addMinutesToTime(t, CLASS_DURATION_MIN);
-    const kidsByDay = scheduleDays.map((d) =>
-      children.filter((c) => c.dayTimes[d.value] === t).sort((a, b) => a.name.localeCompare(b.name, 'ko'))
-    );
+  hours.forEach((hourKey) => {
+    const kidsByDay = scheduleDays.map((d) => getScheduleKidsInHour(children, d.value, hourKey));
     const maxKids = Math.max(1, ...kidsByDay.map((kids) => kids.length));
     const startRow = aoa.length;
 
     for (let sub = 0; sub < maxKids; sub++) {
-      const row = [sub === 0 ? formatTimeRangeLabel(t.slice(0, 5), end) : ''];
+      const row = [sub === 0 ? formatHourLabel(hourKey) : ''];
       kidsByDay.forEach((kids, colIdx) => {
         const c = kids[sub];
         if (!c) {
@@ -3119,7 +3203,8 @@ function exportScheduleExcel() {
         const labels = c.paymentTypes?.length
           ? c.paymentTypes.map((pt) => SCHEDULE_VOUCHER_LABELS[pt] || PAYMENT_TYPES[pt] || pt).join('/')
           : PAYMENT_TYPES.none;
-        row.push(`${c.name} (${labels})`);
+        const minLabel = formatMinuteInHourLabel(c.dayTimes[scheduleDays[colIdx].value]);
+        row.push(`${minLabel ? `[${minLabel}] ` : ''}${c.name} (${labels})`);
         const voucherKey = c.paymentTypes?.[0] || 'none';
         fillByAddr[`${startRow + sub}:${colIdx + 1}`] = SCHEDULE_VOUCHER_FILL_COLORS[voucherKey] || SCHEDULE_VOUCHER_FILL_COLORS.none;
       });
@@ -3133,7 +3218,7 @@ function exportScheduleExcel() {
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!merges'] = merges;
-  ws['!cols'] = [{ wch: 12 }, ...scheduleDays.map(() => ({ wch: 16 }))];
+  ws['!cols'] = [{ wch: 12 }, ...scheduleDays.map(() => ({ wch: 20 }))];
 
   const thinBorder = { style: 'thin', color: { rgb: '000000' } };
   const border = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };

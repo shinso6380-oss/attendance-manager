@@ -655,6 +655,21 @@ body {
   background: var(--bg);
 }
 
+/* 같은 시(時) 칸 안에서 몇 분에 시작하는지 이름 위에 작게 표시 */
+.schedule-min {
+  align-self: center;
+  margin-bottom: .1rem;
+  padding: 0 .35rem;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: .65rem;
+  font-weight: 700;
+  line-height: 1.3;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
 .schedule-meta {
   font-weight: 400;
   color: var(--text-muted);
@@ -1059,6 +1074,7 @@ body {
 }
 
 .field { display: flex; flex-direction: column; gap: .35rem; }
+.field[hidden] { display: none; }
 .field-full { grid-column: 1 / -1; }
 .field span, .field legend { font-size: .85rem; font-weight: 600; }
 
