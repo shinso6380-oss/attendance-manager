@@ -1803,7 +1803,8 @@ function renderAttendance() {
 
   const makeupTimeOptions = generateTimeOptions();
 
-  // 시간대별로 묶어서 보여준다. 정규 시간이 없는(아직 시간 미지정) 보강 인원은 맨 뒤 "시간 미정" 묶음으로.
+  // 시간대별로 묶어서 보여준다. 정규 시간이 없는(아직 시간 미지정) 보강 인원은 맨 위 "시간 미정" 묶음으로
+  // 올려 추가하자마자 시간을 바로 고를 수 있게 하고, 시간을 고르면 해당 시간대 묶음으로 내려간다.
   const groups = new Map(); // time(''=미정) -> children[]
   todayChildren.forEach((c) => {
     const isMakeup = !scheduledIds.has(c.id);
@@ -1813,8 +1814,8 @@ function renderAttendance() {
     groups.get(time).push(c);
   });
   const sortedTimes = [...groups.keys()].sort((a, b) => {
-    if (!a) return 1;
-    if (!b) return -1;
+    if (!a) return -1;
+    if (!b) return 1;
     return a.localeCompare(b);
   });
 
